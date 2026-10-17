@@ -1,6 +1,7 @@
 """ORM models mirroring database/migrations. The SQL migrations are the source of truth:
 change the schema there first, then update these classes to match."""
 
+import uuid
 from datetime import date, datetime
 from typing import Any
 
@@ -13,6 +14,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     Text,
+    Uuid,
     false,
     func,
 )
@@ -88,6 +90,7 @@ class HazardReport(Base):
     reported_by: Mapped[str | None] = mapped_column(Text)
     geom: Mapped[WKBElement] = mapped_column(Point)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    client_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, unique=True)  # offline-queue id
 
 
 class FloodZone(Base):

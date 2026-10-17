@@ -4,11 +4,12 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Camera, CircleCheck, LoaderCircle, X } from 'lucide-react';
+import { Camera, CircleCheck, CloudUpload, LoaderCircle, X } from 'lucide-react';
 import HazardIcon from './HazardIcon';
 import { Skeleton } from './Skeleton';
-import { requestRefresh, usePolling } from '@/lib/usePolling';
-import { HAZARD_TYPES, hazardLabel, type HazardReport, type Site } from '@/lib/types';
+import { usePolling } from '@/lib/usePolling';
+import { submitReport } from '@/lib/reportQueue';
+import { HAZARD_TYPES, hazardLabel, type Site } from '@/lib/types';
 
 const LocationPickerMap = dynamic(() => import('./LocationPickerMap'), {
   ssr: false,
@@ -35,7 +36,8 @@ export default function ReportForm() {
   const [manualPin, setManualPin] = useState<{ lat: number; lon: number } | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [submitted, setSubmitted] = useState<HazardReport | null>(null);
+  // 'sent' = on the server; 'queued' = saved on this device, uploads when there's signal.
+  const [submitted, setSubmitted] = useState<{ siteId: string; hazardType: string; status: 'sent' | 'queued' } | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
 
   // Ask for the phone's location once.
@@ -99,23 +101,21 @@ export default function ReportForm() {
 
     setError(null);
     setSubmitting(true);
-    const body = new FormData();
-    body.set('siteId', siteId);
-    body.set('hazardType', hazardType);
-    body.set('description', description);
-    body.set('reportedBy', reportedBy);
-    body.set('lat', String(pin.lat));
-    body.set('lon', String(pin.lon));
-    if (photo) body.set('photo', photo, 'hazard.jpg');
-
     try {
-      const res = await fetch('/api/reports', { method: 'POST', body });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error ?? `Upload failed (${res.status})`);
-      setSubmitted(json as HazardReport);
-      requestRefresh();
+      // Saved on the device first, so no signal never loses a report; see lib/reportQueue.ts.
+      const result = await submitReport({
+        siteId,
+        hazardType,
+        description,
+        reportedBy,
+        lat: pin.lat,
+        lon: pin.lon,
+        photo,
+      });
+      if (result.status === 'rejected') setError(result.error);
+      else setSubmitted({ siteId, hazardType, status: result.status });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed. Check your signal and try again.');
+      setError(err instanceof Error ? err.message : 'Could not save the report. Try again.');
     } finally {
       setSubmitting(false);
     }
@@ -132,11 +132,17 @@ export default function ReportForm() {
   if (submitted) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-4 p-6 text-center">
-        <CircleCheck size={72} className="text-[#2F9E44]" aria-hidden />
-        <h1 className="text-2xl font-extrabold">Report sent</h1>
+        {submitted.status === 'sent' ? (
+          <CircleCheck size={72} className="text-[#2F9E44]" aria-hidden />
+        ) : (
+          <CloudUpload size={72} className="text-[#E8590C]" aria-hidden />
+        )}
+        <h1 className="text-2xl font-extrabold">{submitted.status === 'sent' ? 'Report sent' : 'Report saved'}</h1>
         <p className="text-lg">
-          {hazardLabel(submitted.hazardType)} at {sites?.find((s) => s.id === submitted.siteId)?.name ?? submitted.siteId}.
-          Supervisors can see it on the map now.
+          {hazardLabel(submitted.hazardType)} at {sites?.find((s) => s.id === submitted.siteId)?.name ?? submitted.siteId}.{' '}
+          {submitted.status === 'sent'
+            ? 'Supervisors can see it on the map now.'
+            : 'No signal right now, so it’s saved on this device and will upload automatically when you’re back in signal. You can keep using the app.'}
         </p>
         <div className="flex w-full flex-col gap-3 sm:flex-row">
           <button type="button" onClick={reportAnother} className="min-h-12 flex-1 rounded-xl bg-[#E8590C] px-4 text-lg font-bold text-white">
@@ -285,7 +291,7 @@ export default function ReportForm() {
         className="flex min-h-14 items-center justify-center gap-2 rounded-xl bg-[#E8590C] text-xl font-extrabold text-white disabled:opacity-60"
       >
         {submitting && <LoaderCircle className="animate-spin" aria-hidden />}
-        {submitting ? 'Sending…' : 'Send report'}
+        {submitting ? 'Saving…' : 'Send report'}
       </button>
     </form>
   );

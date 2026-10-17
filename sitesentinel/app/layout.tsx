@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import AlertsProvider from "@/components/AlertsProvider";
 import AlertBanner from "@/components/AlertBanner";
+import OfflineSupport from "@/components/OfflineSupport";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -18,6 +19,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "SiteSentinel",
   description: "Job site hazard ranking, live safety alerts, and crew hazard reports.",
+  // Installable as an app (the manifest comes from app/manifest.ts); iOS reads these instead.
+  appleWebApp: { capable: true, title: "SiteSentinel", statusBarStyle: "default" },
+  icons: { apple: "/icons/apple-touch-icon.png" },
 };
 
 export const viewport: Viewport = {
@@ -51,6 +55,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               </nav>
             </div>
             <AlertBanner />
+            <OfflineSupport />
           </header>
           <main className="flex flex-1 flex-col lg:min-h-0 lg:overflow-y-auto">{children}</main>
         </AlertsProvider>

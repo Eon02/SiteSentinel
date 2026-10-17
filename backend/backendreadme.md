@@ -311,7 +311,7 @@ hand in the dashboard.
 
 - `database/migrations/*.sql` are applied in filename order by `uv run python -m database.migrate`. Each file runs
   once, in a transaction, and is recorded in `public.schema_migrations`.
-- To change the schema, add a new file with the next number (e.g. `0010_add_wildfire_table.sql`), run the migrate
+- To change the schema, add a new file with the next number (e.g. `0011_add_wildfire_table.sql`), run the migrate
   command, and commit the file. Never edit a migration that has already been applied; add a new one instead.
 - `0001_enable_postgis.sql` enables PostGIS in Supabase's `extensions` schema.
 - `0002_create_core_tables.sql` creates the core tables, with spatial indexes on the `geom` columns:
@@ -339,6 +339,8 @@ hand in the dashboard.
   one or the other).
 - `0009_site_workers_phone_only.sql` drops `email` from `site_workers` and makes `phone` required (warnings are
   SMS only).
+- `0010_hazard_reports_client_id.sql` adds a unique `client_id` (UUID) to `hazard_reports`, so reports retried by
+  the frontend's offline queue aren't saved twice.
 
 Row Level Security is on for every table with no policies, so Supabase's public REST API (the anon key) can't
 read or write them. The backend connects as the database owner and isn't affected. If the frontend should talk

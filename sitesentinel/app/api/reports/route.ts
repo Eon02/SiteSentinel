@@ -1,6 +1,6 @@
 import { put } from '@vercel/blob';
 import { z } from 'zod';
-import { createReport, getRecentReports, siteExists } from '@/lib/data';
+import { createReport, findReportByClientId, getRecentReports, siteExists } from '@/lib/data';
 import { HAZARD_TYPES } from '@/lib/types';
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
@@ -9,6 +9,8 @@ const optionalText = (max: number) =>
   z.string().trim().max(max).optional().transform((v) => (v ? v : undefined));
 
 const ReportInput = z.object({
+  // Generated on the device; lets the offline queue retry without creating duplicates.
+  clientId: z.uuid().optional(),
   siteId: z.string().min(1),
   hazardType: z.enum(HAZARD_TYPES.map((h) => h.value) as [string, ...string[]]),
   description: optionalText(1000),
@@ -32,7 +34,7 @@ export async function POST(req: Request) {
   if (!form) return Response.json({ error: 'Expected multipart/form-data' }, { status: 400 });
 
   const fields = Object.fromEntries(
-    ['siteId', 'hazardType', 'description', 'reportedBy', 'lat', 'lon'].map((k) => [k, form.get(k) ?? undefined]),
+    ['clientId', 'siteId', 'hazardType', 'description', 'reportedBy', 'lat', 'lon'].map((k) => [k, form.get(k) || undefined]),
   );
   const parsed = ReportInput.safeParse(fields);
   if (!parsed.success) {
@@ -40,6 +42,11 @@ export async function POST(req: Request) {
   }
   if (!(await siteExists(parsed.data.siteId))) {
     return Response.json({ error: 'Site not found' }, { status: 404 });
+  }
+  // A retry of a report that already arrived: answer with it, don't upload the photo again.
+  if (parsed.data.clientId) {
+    const existing = await findReportByClientId(parsed.data.clientId);
+    if (existing) return Response.json(existing, { status: 200 });
   }
 
   let photoUrl: string | undefined;

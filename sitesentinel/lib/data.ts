@@ -210,9 +210,31 @@ export async function siteExists(id: string): Promise<boolean> {
   return rows.length > 0;
 }
 
+const REPORT_COLUMNS = `id, site_id, hazard_type, description, photo_url, reported_by,
+  ST_Y(geom) AS lat, ST_X(geom) AS lon, created_at`;
+
+// A report already saved under this device-generated id (an offline-queue retry), if any.
+export async function findReportByClientId(clientId: string): Promise<HazardReport | null> {
+  await connection();
+  if (isMock()) {
+    const hit = store().reports.find((r) => (r as HazardReport & { clientId?: string }).clientId === clientId);
+    return hit ?? null;
+  }
+  const sql = getSql();
+  const [row] = await sql`
+    SELECT ${sql.unsafe(REPORT_COLUMNS)} FROM hazard_reports WHERE client_id = ${clientId}::uuid`;
+  return row ? rowToReport(row) : null;
+}
+
+// Saves a report. With a clientId, saving the same report twice returns the first one instead
+// of creating a duplicate (the offline queue retries after dropped connections).
 export async function createReport(input: NewReport): Promise<HazardReport> {
   await connection();
   if (isMock()) {
+    if (input.clientId) {
+      const existing = await findReportByClientId(input.clientId);
+      if (existing) return existing;
+    }
     const reports = store().reports;
     const report: HazardReport = {
       ...input,
@@ -224,12 +246,14 @@ export async function createReport(input: NewReport): Promise<HazardReport> {
   }
   const sql = getSql();
   const [row] = await sql`
-    INSERT INTO hazard_reports (site_id, hazard_type, description, photo_url, reported_by, geom)
+    INSERT INTO hazard_reports (site_id, hazard_type, description, photo_url, reported_by, geom, client_id)
     VALUES (${input.siteId}, ${input.hazardType}, ${input.description ?? null}, ${input.photoUrl ?? null},
-            ${input.reportedBy ?? null}, ST_SetSRID(ST_MakePoint(${input.lon}, ${input.lat}), 4326))
-    RETURNING id, site_id, hazard_type, description, photo_url, reported_by,
-              ST_Y(geom) AS lat, ST_X(geom) AS lon, created_at`;
-  return rowToReport(row);
+            ${input.reportedBy ?? null}, ST_SetSRID(ST_MakePoint(${input.lon}, ${input.lat}), 4326),
+            ${input.clientId ?? null}::uuid)
+    ON CONFLICT (client_id) DO NOTHING
+    RETURNING ${sql.unsafe(REPORT_COLUMNS)}`;
+  if (row) return rowToReport(row);
+  return (await findReportByClientId(input.clientId!))!; // lost a race with the same clientId
 }
 
 // Demo: create a lightning stop-work alert, or restart the clock on the active one.

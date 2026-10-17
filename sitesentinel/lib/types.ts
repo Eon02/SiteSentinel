@@ -31,6 +31,7 @@ export type HazardReport = {
 export type NewReport = {
   siteId: string; hazardType: string; description?: string;
   photoUrl?: string; reportedBy?: string; lat: number; lon: number;
+  clientId?: string; // UUID from the device's offline queue; makes retried uploads idempotent
 };
 
 export type SiteDetail = {
