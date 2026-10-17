@@ -25,17 +25,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     async with httpx.AsyncClient(timeout=10.0) as http_client:
         app.state.http_client = http_client
-        settings = get_settings()
-        tasks = []
-        if settings.briefings_enabled:
-            tasks.append(asyncio.create_task(scheduler_loop(http_client)))
-        if settings.conditions_enabled:
-            tasks.append(asyncio.create_task(conditions_loop(http_client)))
-        yield
-        for task in tasks:
         background = []
         if settings.briefings_enabled:
             background.append(asyncio.create_task(scheduler_loop(http_client)))
+        if settings.conditions_enabled:
+            background.append(asyncio.create_task(conditions_loop(http_client)))
         if settings.flood_checks_enabled:
             background.append(asyncio.create_task(flood_check_loop(http_client, settings)))
         yield
