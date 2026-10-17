@@ -204,24 +204,25 @@ After importing, run `uv run python -m scripts.load_flood_zones` to load FEMA fl
 
 ## Site workers
 
-Each site (project) has a list of worker emails in the `site_workers` table. Flood warnings for a site go to
-everyone on its list.
+Each site (project) has a list of crew members in the `site_workers` table, identified by phone number. Flood
+warning texts for a site go to everyone on its list.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/sites/{site_id}/workers` | List the site's workers |
-| `POST` | `/sites/{site_id}/workers` | Attach a worker: `{"email": "...", "name": "...", "role": "..."}` (name and role optional) |
-| `DELETE` | `/sites/{site_id}/workers/{email}` | Detach a worker (email is matched ignoring case) |
+| `POST` | `/sites/{site_id}/workers` | Attach a worker: `{"phone": "...", "name": "...", "role": "..."}` (name and role optional) |
+| `DELETE` | `/sites/{site_id}/workers/{phone}` | Detach a worker (phone in any format) |
 
 ```bash
 curl -X POST localhost:8000/sites/6045/workers -H 'content-type: application/json' \
-     -d '{"email": "crew-lead@example.com", "name": "Sam Rivera", "role": "crew lead"}'
+     -d '{"phone": "(205) 555-0123", "name": "Sam Rivera", "role": "crew lead"}'
 ```
 
-Adding an email that's already on the site returns `409` (case doesn't matter), and an unknown site returns
-`404`. Deleting a site removes its workers.
+Phone numbers are accepted in any common format and stored in E.164 form (`+12055550123`); numbers without a
+`+country` code are read as US numbers. Adding a number that's already on the site returns `409`, an invalid number
+`422`, and an unknown site `404`. Deleting a site removes its workers.
 
-## Flood warnings by email
+## Flood warnings (SMS)
 
 A site is at flood risk when either:
 
@@ -229,46 +230,61 @@ A site is at flood risk when either:
 2. it had heavy rain in the past 24 hours (Open-Meteo; default 1 inch or more) **and** it is exposed:
    `near_river` is true, it is inside a FEMA high-risk zone, or one is within 0.5 miles (`site_flood_risk`).
 
-An at-risk site gets an active `flood` alert in the `alerts` table (one per site at a time), and every worker
-attached to the site is emailed. The email covers the reasons, rain so far and tomorrow, soil saturation, any NWS
-instructions, and a safety checklist. When a site is no longer at risk, its flood alert is cleared, but only if
-every data source answered, so an outage can't cancel a real warning.
+An at-risk site gets an active `flood` alert in the `alerts` table (one per site at a time), which the dashboard
+shows. When a site is no longer at risk, its flood alert is cleared, but only if every data source answered, so an
+outage can't cancel a real warning.
 
-There are two ways the check runs:
-
-- **Automatically**, when `FLOOD_CHECKS_ENABLED=true`. Every `FLOOD_CHECK_INTERVAL_S` seconds (default 1800) every
-  site is checked, and workers are emailed **only when a site's warning is first raised**. They are not emailed
-  again while it stays in effect, and they are emailed again if it clears and later comes back. Keep this off
-  on dev machines and turn it on in one deployed instance, like the briefings.
-- **On demand** with `POST /alerts/flood`, which always emails for every at-risk site:
+**Texting crews only happens on request**, with `POST /alerts/flood/sms`. Nothing automated sends texts. It checks
+the sites and texts every worker attached to each at-risk site, plus any extra numbers given:
 
 ```bash
-curl -X POST localhost:8000/alerts/flood -H 'content-type: application/json' -d '{}'
-curl -X POST localhost:8000/alerts/flood -H 'content-type: application/json' \
-     -d '{"emails": ["supervisor@example.com"], "site_ids": ["6045"]}'
+curl -X POST localhost:8000/alerts/flood/sms -H 'content-type: application/json' -d '{}'
+curl -X POST localhost:8000/alerts/flood/sms -H 'content-type: application/json' \
+     -d '{"phones": ["(205) 555-0123"], "site_ids": ["6045"]}'
 ```
 
 | Field | Default | Purpose |
 | --- | --- | --- |
-| `emails` | `[]` | Extra addresses to warn, on top of each at-risk site's workers (max 100) |
-| `notify_site_workers` | `true` | Email the workers attached to each at-risk site |
+| `phones` | `[]` | Extra numbers to text, any common format (max 100) |
+| `notify_site_workers` | `true` | Text the workers attached to each at-risk site |
 | `site_ids` | all sites | Limit the check to these sites |
 | `rain_threshold_in` | `1.0` | Past-24h rain, in inches, that counts as heavy |
 
-Every address gets its own email, one per at-risk site, and duplicates are removed ignoring case. The
-response lists every site checked with its numbers, reasons, `alert_id`, `newly_raised`, any `source_errors`,
-and the delivery status per address (`sent`, `failed`, or `skipped` when email isn't configured).
+Every number gets its own text, one per at-risk site, and duplicates are removed. Each call sends again, so call it
+once per warning. The response lists every site checked with its numbers, reasons, `alert_id`, `newly_raised`, any
+`source_errors`, and the delivery status per number in `sms` (`sent`, `failed`, or `skipped` when Twilio isn't
+configured). The text is short (at most two SMS segments, plain characters only), e.g.:
+
+> FLOOD RISK: Allen (TN). 2.4 in rain in 24h, site near river. Avoid flooded roads; keep equipment on high
+> ground. Map: https://maps.google.com/?q=35.07,-90.15
+
+The **automated check** (`FLOOD_CHECKS_ENABLED=true`) runs the same assessment every `FLOOD_CHECK_INTERVAL_S` seconds
+and keeps the flood alerts current for the dashboard. It sends no texts. Keep it off on dev machines and turn it on
+in one deployed instance, like the briefings.
 
 | Setting | Default | Purpose |
 | --- | --- | --- |
-| `FLOOD_CHECKS_ENABLED` | `false` | Run the automated check in the API process |
+| `FLOOD_CHECKS_ENABLED` | `false` | Run the automated check (alerts only) in the API process |
 | `FLOOD_CHECK_INTERVAL_S` | `1800` | Seconds between automated checks |
 | `FLOOD_RAIN_THRESHOLD_IN` | `1.0` | Heavy-rain threshold for the automated check |
 
-Email goes out over SMTP; set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `SMTP_FROM` in
-`.env` (see `.env.example`; Gmail works with an app password). Use port 465 for implicit TLS, or
-`SMTP_STARTTLS=false` for a local test server such as `uv run python -m aiosmtpd -n -l 127.0.0.1:8025`, which
-prints received mail to the terminal. Tests never read `.env`, so running `uv run pytest` never sends real email.
+Texts go out through [Twilio](https://www.twilio.com). Set `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN` (Twilio
+console home page) and either `TWILIO_FROM_NUMBER` (your Twilio number, E.164) or `TWILIO_MESSAGING_SERVICE_SID` in
+`.env`. Without them, texts are reported as `skipped`.
+
+- **Every text uses Twilio credit.** Use `site_ids` and `notify_site_workers: false` with a single `phones` entry
+  to test with one text.
+- **Trial accounts** can only text verified numbers and can only send Twilio's predefined templates; a custom
+  body fails with Twilio error 572006. Set `TWILIO_BODY_TEMPLATE=sms_internal_alerts` to send that template as
+  every text's body instead. Recipients then get Twilio's canned wording ("Alert: System downtime detected..."),
+  not the flood details. Upgrade the account and remove the setting to send the real warning text.
+- **Real use in the US** needs the sending number registered with carriers: A2P 10DLC registration for a regular
+  number (days to weeks), or toll-free verification (usually faster). Unregistered numbers get filtered.
+- Recipients must have agreed to receive texts. Twilio handles STOP/START replies automatically.
+- A failed text (unverified number, bad number) is reported with Twilio's error and isn't retried; timeouts and
+  Twilio server errors are retried up to 3 times.
+
+Tests never read `.env` and mock Twilio, so running `uv run pytest` never sends real texts.
 
 For a demo on a dry day, pass `"rain_threshold_in": 0`. Any river or floodplain site then counts as at risk.
 
@@ -295,7 +311,7 @@ hand in the dashboard.
 
 - `database/migrations/*.sql` are applied in filename order by `uv run python -m database.migrate`. Each file runs
   once, in a transaction, and is recorded in `public.schema_migrations`.
-- To change the schema, add a new file with the next number (e.g. `0008_add_wildfire_table.sql`), run the migrate
+- To change the schema, add a new file with the next number (e.g. `0010_add_wildfire_table.sql`), run the migrate
   command, and commit the file. Never edit a migration that has already been applied; add a new one instead.
 - `0001_enable_postgis.sql` enables PostGIS in Supabase's `extensions` schema.
 - `0002_create_core_tables.sql` creates the core tables, with spatial indexes on the `geom` columns:
@@ -319,6 +335,10 @@ hand in the dashboard.
   active flood alert per site.
 - `0007_add_conditions_gust_humidity.sql` adds `wind_gust_mph` and `humidity_pct` (relative humidity, 0-100) to
   `conditions`.
+- `0008_site_workers_phone.sql` adds `phone` to `site_workers` and makes `email` optional (each worker needs
+  one or the other).
+- `0009_site_workers_phone_only.sql` drops `email` from `site_workers` and makes `phone` required (warnings are
+  SMS only).
 
 Row Level Security is on for every table with no policies, so Supabase's public REST API (the anon key) can't
 read or write them. The backend connects as the database owner and isn't affected. If the frontend should talk
@@ -346,7 +366,9 @@ backend/
 │   ├── db.py          # async SQLAlchemy engine, Base, SessionDep
 │   ├── models.py      # ORM models matching the migrations
 │   ├── http.py        # shared outbound HTTP client
-│   ├── services/      # data clients (open_meteo, nws, fema_nfhl), briefings, flood warnings, email
+│   ├── services/      # data clients (open_meteo, nws, fema_nfhl), briefings, flood warnings,
+│   │                  #   SMS (Twilio)
+│   ├── phones.py      # phone number parsing (E.164)
 │   └── routers/       # one module per API area
 ├── database/
 │   ├── migrate.py     # applies migrations/ to DATABASE_URL

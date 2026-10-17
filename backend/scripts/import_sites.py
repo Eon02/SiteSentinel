@@ -1,12 +1,13 @@
-"""Import job sites from an EIA-860M style spreadsheet (.xlsx) into the sites table.
+"""Import job sites from an EIA-860M style spreadsheet (.xlsx or .csv) into the sites table.
 
 Run from backend/:
     uv run python -m scripts.import_sites path/to/sheet.xlsx              # add new sites
-    uv run python -m scripts.import_sites path/to/sheet.xlsx --dry-run    # preview only
+    uv run python -m scripts.import_sites path/to/sites.csv --dry-run     # preview only
     uv run python -m scripts.import_sites path/to/sheet.xlsx --update     # also overwrite existing
 
 The sheet needs EIA-860M "Operating" columns: Plant ID, Plant Name, Entity Name, County,
-Plant State, Technology, Nameplate Capacity (MW), Latitude, Longitude. EIA lists one row per
+Plant State, Technology, Nameplate Capacity (MW), Latitude, Longitude. A file without a header
+row is read as the full 37-column EIA-860M layout, in EIA's column order. EIA lists one row per
 generator, so rows are grouped by Plant ID; the plant type is the technology of its largest
 generator. Two fields EIA doesn't have are derived:
 
@@ -18,6 +19,7 @@ generator. Two fields EIA doesn't have are derived:
 
 import argparse
 import asyncio
+import csv
 import json
 import time
 import urllib.parse
@@ -41,6 +43,20 @@ CONCURRENT_LOOKUPS = 6  # USGS is slow per request but handles a few in parallel
 
 REQUIRED = ["Plant ID", "Plant Name", "Plant State", "Latitude", "Longitude"]
 
+# Column order of EIA-860M's "Operating" sheet, used when a file has no header row.
+EIA_860M_COLUMNS = [
+    "Entity ID", "Entity Name", "Plant ID", "Plant Name", "Google Map", "Bing Map",
+    "Plant State", "County", "Balancing Authority Code", "Sector", "Generator ID", "Unit Code",
+    "Nameplate Capacity (MW)", "Net Summer Capacity (MW)", "Net Winter Capacity (MW)",
+    "Technology", "Energy Source Code", "Prime Mover Code", "Operating Month", "Operating Year",
+    "Planned Retirement Month", "Planned Retirement Year", "Status",
+    "Nameplate Energy Capacity (MWh)", "DC Net Capacity (MW)", "Planned Derate Year",
+    "Planned Derate Month", "Planned Derate of Summer Capacity (MW)", "Planned Uprate Year",
+    "Planned Uprate Month", "Planned Uprate of Summer Capacity (MW)", "Planned Repower Year",
+    "Planned Repower Month", "Other Modification Year", "Other Modification Month",
+    "Latitude", "Longitude",
+]  # fmt: skip
+
 
 @dataclass
 class NearestRiver:
@@ -48,23 +64,49 @@ class NearestRiver:
     stream_order: int
 
 
+def read_rows(path: Path) -> list[list]:
+    """All rows of the first sheet of an .xlsx file, or of a .csv file."""
+    if path.suffix.lower() == ".csv":
+        with path.open(encoding="utf-8-sig", newline="") as f:
+            return [row for row in csv.reader(f)]
+    sheet = load_workbook(path, read_only=True, data_only=True).active
+    return [list(row) for row in sheet.iter_rows(values_only=True)]
+
+
+def number(value: object) -> float:
+    """Spreadsheet number to float; accepts text like "1,080.00" and blanks (0)."""
+    if value in (None, ""):
+        return 0.0
+    return float(str(value).replace(",", "").strip())
+
+
 def read_plants(path: Path) -> list[dict]:
     """One dict per plant (grouped by Plant ID), keeping its largest generator's row."""
-    sheet = load_workbook(path, read_only=True, data_only=True).active
-    rows = list(sheet.iter_rows(values_only=True))
-    header = [str(h).strip() if h is not None else "" for h in rows[0]]
+    rows = read_rows(path)
+    if not rows:
+        raise SystemExit("The file is empty")
+    first = [str(h).strip() if h is not None else "" for h in rows[0]]
+    if "Plant ID" in first:
+        header, data = first, rows[1:]
+    elif len(first) == len(EIA_860M_COLUMNS):
+        header, data = EIA_860M_COLUMNS, rows  # no header row: standard EIA-860M layout
+    else:
+        raise SystemExit(
+            f"No header row, and {len(first)} columns doesn't match the "
+            f"{len(EIA_860M_COLUMNS)}-column EIA-860M layout"
+        )
     missing = [c for c in REQUIRED if c not in header]
     if missing:
         raise SystemExit(f"Spreadsheet is missing columns: {', '.join(missing)}")
     plants: dict[str, dict] = {}
-    for values in rows[1:]:
+    for values in data:
         row = dict(zip(header, values, strict=False))
         if row.get("Plant ID") in (None, ""):
             continue
-        plant_id = str(int(float(row["Plant ID"])))
-        capacity = float(row.get("Nameplate Capacity (MW)") or 0)
+        plant_id = str(int(number(row["Plant ID"])))
+        capacity = number(row.get("Nameplate Capacity (MW)"))
         kept = plants.get(plant_id)
-        if kept is None or capacity > float(kept.get("Nameplate Capacity (MW)") or 0):
+        if kept is None or capacity > number(kept.get("Nameplate Capacity (MW)")):
             plants[plant_id] = {**row, "Plant ID": plant_id}
     return list(plants.values())
 
@@ -192,7 +234,7 @@ async def save(sites: list[SiteCreate], update: bool) -> tuple[int, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("path", type=Path, help="EIA-860M style .xlsx file")
+    parser.add_argument("path", type=Path, help="EIA-860M style .xlsx or .csv file")
     parser.add_argument("--dry-run", action="store_true", help="show what would be imported")
     parser.add_argument("--update", action="store_true", help="overwrite sites that already exist")
     parser.add_argument(

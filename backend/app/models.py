@@ -138,13 +138,13 @@ class Briefing(Base):
 
 
 class SiteWorker(Base):
-    """A worker attached to a site; receives that site's flood warnings by email."""
+    """A worker attached to a site; receives that site's flood warnings by SMS."""
 
     __tablename__ = "site_workers"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     site_id: Mapped[str] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
-    email: Mapped[str] = mapped_column(Text)
+    phone: Mapped[str] = mapped_column(Text)  # E.164, e.g. +12055550123
     name: Mapped[str | None] = mapped_column(Text)
     role: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

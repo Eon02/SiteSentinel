@@ -1,11 +1,8 @@
 import asyncio
-import socket
-from dataclasses import replace
-from email import message_from_bytes
+from dataclasses import dataclass, replace
 
 import httpx
 import pytest
-from aiosmtpd.controller import Controller
 from fastapi.testclient import TestClient
 
 from app.config import Settings
@@ -14,10 +11,10 @@ from app.main import app
 from app.routers import alerts as alerts_router
 from app.services import flood_warnings
 from app.services.briefings import SiteInfo
-from app.services.email import OutgoingEmail, send_emails
-from app.services.flood_warnings import assess, warning_email
+from app.services.flood_warnings import SMS_MAX_CHARS, assess, warning_sms
 from app.services.nws import ActiveAlert
 from app.services.open_meteo import _parse
+from app.services.sms import OutgoingSms, send_sms
 from tests.test_weather import SAMPLE as OPEN_METEO_SAMPLE
 
 RIVER_SITE = SiteInfo(
@@ -102,96 +99,132 @@ def test_missing_weather_is_not_at_risk_but_flags_unknowns() -> None:
     assert result.precip_24h_in is None
 
 
-def test_warning_email_contents() -> None:
-    result = assess(RIVER_SITE, weather(2.4), [nws_alert("Flood Warning")], 1.0, "2026-08-15")
-    email = warning_email(result, "crew@example.com")
-
-    assert email.to == "crew@example.com"
-    assert email.subject == "FLOOD RISK WARNING: Allen (TN)"
-    assert "NWS Flood Warning in effect" in email.body
-    assert "Rain, past 24 hours: 2.40 in" in email.body
-    assert "Turn around, don't drown." in email.body
-    assert "never drive through standing or moving water" in email.body
+# --- SMS text ------------------------------------------------------------------------
 
 
-# --- SMTP ----------------------------------------------------------------------------
+def test_sms_warning_is_short_and_plain() -> None:
+    alerts = [nws_alert("Flash Flood Warning"), nws_alert("Flood Watch")]
+    result = assess(RIVER_SITE, weather(2.4), alerts, 1.0)
+    text = warning_sms(result, "+12055550123")
+
+    assert len(text.body) <= SMS_MAX_CHARS
+    assert text.body.isascii()  # plain GSM characters keep 160-character segments
+    assert "NWS Flash Flood Warning in effect" in text.body
+    assert "2.4 in rain in 24h, site near river" in text.body
+    assert text.body.endswith("Map: https://maps.google.com/?q=35.07,-90.15")
 
 
-class Inbox:
-    def __init__(self) -> None:
-        self.messages: list = []
-
-    async def handle_DATA(self, server, session, envelope):  # noqa: N802 (aiosmtpd API)
-        self.messages.append((envelope.rcpt_tos, message_from_bytes(envelope.content)))
-        return "250 OK"
-
-
-def free_port() -> int:
-    with socket.socket() as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+def test_sms_warning_trims_to_two_segments() -> None:
+    alerts = [nws_alert(f"Flood Warning number {i} with a long name") for i in range(10)]
+    long_name = replace(RIVER_SITE, name="A Very Long Power Plant Name " * 3)
+    text = warning_sms(assess(long_name, weather(2.4), alerts, 1.0), "+12055550123")
+    assert len(text.body) <= SMS_MAX_CHARS
+    assert "maps.google.com" in text.body
 
 
-@pytest.fixture
-def smtp_server():
-    inbox = Inbox()
-    controller = Controller(inbox, hostname="127.0.0.1", port=free_port())
-    controller.start()
-    yield inbox, controller.port
-    controller.stop()
+# --- Twilio sender (mocked; never reaches Twilio) ------------------------------------
 
 
-def smtp_settings(port: int, **overrides) -> Settings:
+def twilio_settings(**overrides) -> Settings:
     return Settings(
         database_url="postgresql://t:t@localhost/t",
-        smtp_host="127.0.0.1",
-        smtp_port=port,
-        smtp_starttls=False,
-        smtp_from="SiteSentinel <alerts@sitesentinel.test>",
+        twilio_account_sid="AC123",
+        twilio_auth_token="token",
+        twilio_from_number="+12055550100",
+        twilio_api_url="https://twilio.test",
         **overrides,
     )
 
 
-def test_send_emails_one_message_per_recipient(smtp_server) -> None:
-    inbox, port = smtp_server
-    emails = [
-        OutgoingEmail("a@example.com", "Subj", "Body"),
-        OutgoingEmail("b@example.com", "Subj", "Body"),
-    ]
+def run_sms(settings: Settings, responses: list[httpx.Response]) -> tuple[list, list]:
+    calls: list[httpx.Request] = []
 
-    results = asyncio.run(send_emails(smtp_settings(port), emails))
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        return responses[min(len(calls), len(responses)) - 1]
 
-    assert [r.status for r in results] == ["sent", "sent"]
-    assert [rcpts for rcpts, _ in inbox.messages] == [["a@example.com"], ["b@example.com"]]
-    assert inbox.messages[0][1]["From"] == "SiteSentinel <alerts@sitesentinel.test>"
+    async def go():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await send_sms(client, settings, [OutgoingSms("+12055550123", "Hello")])
 
-
-def test_send_emails_skipped_when_not_configured() -> None:
-    settings = Settings(database_url="postgresql://t:t@localhost/t")
-    results = asyncio.run(send_emails(settings, [OutgoingEmail("a@example.com", "S", "B")]))
-    assert results[0].status == "skipped"
+    return asyncio.run(go()), calls
 
 
-def test_send_emails_reports_unreachable_server() -> None:
-    results = asyncio.run(
-        send_emails(smtp_settings(free_port()), [OutgoingEmail("a@example.com", "S", "B")])
+def test_send_sms_posts_to_twilio() -> None:
+    results, calls = run_sms(twilio_settings(), [httpx.Response(201, json={"sid": "SM1"})])
+
+    assert results[0].status == "sent"
+    request = calls[0]
+    assert str(request.url) == "https://twilio.test/2010-04-01/Accounts/AC123/Messages.json"
+    assert request.headers["Authorization"].startswith("Basic ")
+    form = dict(httpx.QueryParams(request.content.decode()))
+    assert form == {"To": "+12055550123", "Body": "Hello", "From": "+12055550100"}
+
+
+def test_send_sms_uses_messaging_service_when_set() -> None:
+    settings = twilio_settings(twilio_messaging_service_sid="MG999")
+    _, calls = run_sms(settings, [httpx.Response(201, json={})])
+    form = dict(httpx.QueryParams(calls[0].content.decode()))
+    assert form["MessagingServiceSid"] == "MG999"
+    assert "From" not in form
+
+
+def test_send_sms_uses_trial_template_as_body() -> None:
+    settings = twilio_settings(twilio_body_template="sms_internal_alerts")
+    results, calls = run_sms(settings, [httpx.Response(201, json={})])
+
+    form = dict(httpx.QueryParams(calls[0].content.decode()))
+    assert form["Body"] == "sms_internal_alerts"
+    assert results[0].status == "sent"
+
+
+def test_send_sms_reports_twilio_rejection_without_retrying() -> None:
+    rejection = httpx.Response(
+        400, json={"code": 21608, "message": "The number is unverified for trial accounts"}
     )
+    results, calls = run_sms(twilio_settings(), [rejection])
+
     assert results[0].status == "failed"
-    assert "SMTP connection failed" in results[0].error
+    assert results[0].error == "Twilio error 21608: The number is unverified for trial accounts"
+    assert len(calls) == 1
 
 
-# --- endpoint ------------------------------------------------------------------------
+def test_send_sms_retries_server_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_sleep(_: float) -> None:
+        pass
+
+    monkeypatch.setattr("app.services.sms.asyncio.sleep", no_sleep)
+    results, calls = run_sms(twilio_settings(), [httpx.Response(503), httpx.Response(201)])
+    assert results[0].status == "sent"
+    assert len(calls) == 2
+
+
+def test_send_sms_skipped_when_not_configured() -> None:
+    settings = Settings(database_url="postgresql://t:t@localhost/t")
+    results, calls = run_sms(settings, [httpx.Response(201)])
+    assert results[0].status == "skipped"
+    assert calls == []
+
+
+# --- endpoint and automated check (mocked sites, weather, NWS, Twilio and DB) --------
+
+
+@dataclass
+class Env:
+    client: TestClient
+    texts: list[dict]  # form bodies POSTed to the mock Twilio API
+    settings: Settings
+    http: httpx.AsyncClient
 
 
 @pytest.fixture
-def endpoint(smtp_server, monkeypatch: pytest.MonkeyPatch):
-    """Flood checks with mocked sites, weather, NWS and DB, and a real local SMTP server."""
-    inbox, port = smtp_server
-    settings = smtp_settings(
-        port, open_meteo_url="https://meteo.test/v1/forecast", nws_url="https://nws.test"
+def endpoint(monkeypatch: pytest.MonkeyPatch):
+    settings = twilio_settings(
+        open_meteo_url="https://meteo.test/v1/forecast", nws_url="https://nws.test"
     )
     active_alerts: dict[str, int] = {}  # site_id -> alert id, standing in for the alerts table
-    workers = {"55": ["worker1@example.com", "lead@EXAMPLE.com"]}
+    workers = {"55": ["+12055550123", "+12055550199"]}
+    texts: list[dict] = []
 
     async def fake_load_sites(site_ids=None):
         sites = [RIVER_SITE, DRY_UPLAND_SITE]
@@ -209,6 +242,9 @@ def endpoint(smtp_server, monkeypatch: pytest.MonkeyPatch):
         return {k: v for k, v in workers.items() if k in site_ids}
 
     def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "twilio.test":
+            texts.append(dict(httpx.QueryParams(request.content.decode())))
+            return httpx.Response(201, json={"sid": "SM1", "status": "queued"})
         if request.url.host == "meteo.test":
             rainy = {**OPEN_METEO_SAMPLE, "hourly": {**OPEN_METEO_SAMPLE["hourly"]}}
             rainy["hourly"]["precipitation"] = [0.0] + [0.1] * 24  # 2.4 in
@@ -221,109 +257,97 @@ def endpoint(smtp_server, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(flood_warnings, "load_site_workers", fake_load_site_workers)
     http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     app.dependency_overrides[get_http_client] = lambda: http
-    yield TestClient(app), inbox, settings, http
+    yield Env(TestClient(app), texts, settings, http)
     app.dependency_overrides.clear()
 
 
-def sent_to(inbox) -> list[str]:
-    return [rcpts[0] for rcpts, _ in inbox.messages]
-
-
-def test_endpoint_emails_site_workers_and_extra_addresses(endpoint) -> None:
-    client, inbox, _, _ = endpoint
-    body = {"emails": ["Lead@example.com", "crew@example.com", "lead@example.com"]}
-
-    response = client.post("/alerts/flood", json=body)
+def test_sms_endpoint_texts_crew_of_at_risk_sites(endpoint) -> None:
+    response = endpoint.client.post(
+        "/alerts/flood/sms", json={"phones": ["205-555-0123", "(205) 555-0177"]}
+    )
 
     assert response.status_code == 200
     results = {r["site_id"]: r for r in response.json()}
-    assert results["55"]["at_risk"] is True
-    assert results["55"]["alert_id"] == 100
-    assert results["55"]["newly_raised"] is True
-    # extra emails first, then the site's workers; case-insensitive duplicates sent once
-    expected = ["Lead@example.com", "crew@example.com", "worker1@example.com"]
-    assert [e["to"] for e in results["55"]["emails"]] == expected
-    assert all(e["status"] == "sent" for e in results["55"]["emails"])
+    site = results["55"]
+    assert site["at_risk"] is True
+    assert site["alert_id"] == 100
+    # extra numbers first, normalized to E.164; the worker's copy of +12055550123 sent once
+    expected = ["+12055550123", "+12055550177", "+12055550199"]
+    assert [d["to"] for d in site["sms"]] == expected
+    assert all(d["status"] == "sent" for d in site["sms"])
     assert results["56"]["at_risk"] is False  # not near a river or floodplain
-    assert results["56"]["emails"] == []
-    assert sent_to(inbox) == expected
-    assert inbox.messages[0][1]["Subject"] == "FLOOD RISK WARNING: Allen (TN)"
+    assert results["56"]["sms"] == []
+    assert [t["To"] for t in endpoint.texts] == expected
+    assert endpoint.texts[0]["From"] == "+12055550100"
+    assert endpoint.texts[0]["Body"].startswith("FLOOD RISK: Allen (TN).")
 
 
-def test_endpoint_without_emails_warns_site_workers(endpoint) -> None:
-    client, inbox, _, _ = endpoint
-    response = client.post("/alerts/flood", json={})
-
-    assert response.status_code == 200
-    assert sent_to(inbox) == ["worker1@example.com", "lead@EXAMPLE.com"]
+def test_sms_endpoint_texts_site_workers_by_default(endpoint) -> None:
+    endpoint.client.post("/alerts/flood/sms", json={})
+    assert [t["To"] for t in endpoint.texts] == ["+12055550123", "+12055550199"]
 
 
-def test_endpoint_can_skip_site_workers(endpoint) -> None:
-    client, inbox, _, _ = endpoint
-    body = {"emails": ["crew@example.com"], "notify_site_workers": False}
-    client.post("/alerts/flood", json=body)
-    assert sent_to(inbox) == ["crew@example.com"]
+def test_sms_endpoint_can_skip_site_workers(endpoint) -> None:
+    body = {"phones": ["205-555-0177"], "notify_site_workers": False}
+    endpoint.client.post("/alerts/flood/sms", json=body)
+    assert [t["To"] for t in endpoint.texts] == ["+12055550177"]
 
 
-def test_endpoint_emails_on_every_manual_call(endpoint) -> None:
-    client, inbox, _, _ = endpoint
-    client.post("/alerts/flood", json={"notify_site_workers": True})
-    second = client.post("/alerts/flood", json={}).json()
+def test_sms_endpoint_texts_on_every_call(endpoint) -> None:
+    endpoint.client.post("/alerts/flood/sms", json={})
+    second = endpoint.client.post("/alerts/flood/sms", json={}).json()
 
     assert {r["site_id"]: r["newly_raised"] for r in second}["55"] is False
-    assert len(inbox.messages) == 4  # 2 workers x 2 calls: manual checks always send
+    assert len(endpoint.texts) == 4  # 2 workers x 2 calls: each request sends
 
 
-def test_automated_check_emails_only_when_warning_first_raised(endpoint) -> None:
-    _, inbox, settings, http = endpoint
-
-    async def run():
-        return await flood_warnings.run_flood_check(http, settings, only_newly_raised=True)
-
-    first = asyncio.run(run())
-    second = asyncio.run(run())
-
-    assert [len(r.deliveries) for r in first] == [2, 0]
-    assert [len(r.deliveries) for r in second] == [0, 0]  # still active: no repeat emails
-    assert sent_to(inbox) == ["worker1@example.com", "lead@EXAMPLE.com"]
-
-
-def test_endpoint_threshold_is_adjustable(endpoint) -> None:
-    client, inbox, _, _ = endpoint
-    response = client.post(
-        "/alerts/flood", json={"emails": ["a@example.com"], "rain_threshold_in": 3.0}
-    )
+def test_sms_endpoint_threshold_is_adjustable(endpoint) -> None:
+    response = endpoint.client.post("/alerts/flood/sms", json={"rain_threshold_in": 3.0})
     assert not any(r["at_risk"] for r in response.json())
-    assert inbox.messages == []
+    assert endpoint.texts == []
 
 
 @pytest.mark.parametrize(
     "body",
     [
-        {"emails": [], "notify_site_workers": False},  # nobody to email
-        {"emails": ["not-an-email"]},
-        {"emails": ["a@example.com"], "rain_threshold_in": -1},
+        {"phones": ["555-0123"]},
+        {"phones": [], "notify_site_workers": False},
+        {"rain_threshold_in": -1},
     ],
 )
-def test_endpoint_rejects_bad_input(endpoint, body: dict) -> None:
-    client, _, _, _ = endpoint
-    assert client.post("/alerts/flood", json=body).status_code == 422
+def test_sms_endpoint_rejects_bad_input(endpoint, body: dict) -> None:
+    assert endpoint.client.post("/alerts/flood/sms", json=body).status_code == 422
 
 
-def test_endpoint_unknown_sites_404(endpoint) -> None:
-    client, _, _, _ = endpoint
-    response = client.post("/alerts/flood", json={"emails": ["a@example.com"], "site_ids": ["x"]})
+def test_sms_endpoint_unknown_sites_404(endpoint) -> None:
+    response = endpoint.client.post("/alerts/flood/sms", json={"site_ids": ["x"]})
     assert response.status_code == 404
 
 
+def test_email_endpoint_is_gone(endpoint) -> None:
+    assert endpoint.client.post("/alerts/flood", json={}).status_code in (404, 405)
+
+
+def test_automated_check_records_alerts_but_sends_nothing(endpoint) -> None:
+    async def run():
+        return await flood_warnings.run_flood_check(endpoint.http, endpoint.settings)
+
+    results = asyncio.run(run())
+
+    assert [r.assessment.at_risk for r in results] == [True, False]
+    assert results[0].assessment.alert_id == 100
+    assert all(r.deliveries == [] for r in results)
+    assert endpoint.texts == []
+
+
 def test_recipients_merges_without_duplicates() -> None:
-    merged = flood_warnings.recipients(["A@x.com", "b@x.com"], ["a@X.com", " c@x.com "])
-    assert merged == ["A@x.com", "b@x.com", "c@x.com"]
+    merged = flood_warnings.recipients(["+12055550123", "+12055550124"], [" +12055550123 "])
+    assert merged == ["+12055550123", "+12055550124"]
 
 
-def test_tests_never_read_real_email_settings() -> None:
-    """Guard: the developer's .env (real SMTP credentials) must be ignored under pytest."""
+def test_tests_never_read_real_settings() -> None:
+    """Guard: the developer's .env (real Twilio credentials) must be ignored under pytest."""
     settings = Settings()
-    assert settings.smtp_host is None
-    assert settings.smtp_password is None
+    assert settings.twilio_account_sid is None
+    assert settings.twilio_auth_token is None
     assert settings.briefing_webhook_url is None

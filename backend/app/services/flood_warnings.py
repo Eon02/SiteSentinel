@@ -9,9 +9,9 @@ A site is at flood risk when either:
 Assessed sites get a row in `alerts` (type 'flood'); sites no longer at risk have their
 active flood alert cleared.
 
-Warnings are emailed to every worker attached to the site (`site_workers`), plus any extra
-addresses given. The manual check (POST /alerts/flood) emails on every call; the automated
-check (FLOOD_CHECKS_ENABLED) emails only when a site's warning is first raised.
+Warnings are texted to the workers attached to each at-risk site (`site_workers`), plus any
+extra numbers given, only on request through POST /alerts/flood/sms. The automated check
+(FLOOD_CHECKS_ENABLED) records and clears alerts but never sends anything.
 """
 
 import asyncio
@@ -26,13 +26,15 @@ from sqlalchemy import text
 from app.config import Settings
 from app.db import SessionLocal
 from app.services.briefings import SiteInfo, load_sites
-from app.services.email import DeliveryResult, OutgoingEmail, send_emails
 from app.services.nws import ActiveAlert, NwsError, fetch_active_alerts
 from app.services.open_meteo import OpenMeteoError, WeatherReport, fetch_weather
+from app.services.sms import DeliveryResult, OutgoingSms, send_sms
 
 DEFAULT_RAIN_THRESHOLD_IN = 1.0
 SFHA_NEARBY_MI = 0.5
-SATURATED_SOIL = 0.4  # m³/m³ in the top 1 cm; above this the ground takes little more water
+SMS_MAX_CHARS = 320  # two SMS segments
+# Curly quotes and dashes would switch a text to UCS-2, cutting each segment to 70 characters.
+GSM_REPLACEMENTS = {0x2018: "'", 0x2019: "'", 0x201C: '"', 0x201D: '"', 0x2013: "-", 0x2014: "-"}
 CONCURRENT_SITES = 5
 
 logger = logging.getLogger("sitesentinel.flood")
@@ -183,26 +185,26 @@ async def record_alerts(assessments: list[FloodAssessment]) -> None:
 
 
 async def load_site_workers(site_ids: list[str]) -> dict[str, list[str]]:
-    """Worker emails attached to each site."""
+    """Phone numbers (E.164) of the workers attached to each site."""
     if not site_ids:
         return {}
     async with SessionLocal() as session:
         rows = await session.execute(
-            text("SELECT site_id, email FROM site_workers WHERE site_id = ANY(:ids) ORDER BY id"),
+            text("SELECT site_id, phone FROM site_workers WHERE site_id = ANY(:ids) ORDER BY id"),
             {"ids": site_ids},
         )
     workers: dict[str, list[str]] = {}
-    for site_id, email in rows:
-        workers.setdefault(site_id, []).append(email)
+    for site_id, phone in rows:
+        workers.setdefault(site_id, []).append(phone)
     return workers
 
 
 def recipients(*groups: list[str]) -> list[str]:
-    """Merge address lists in order, dropping case-insensitive duplicates."""
+    """Merge number lists in order, dropping duplicates."""
     seen: dict[str, str] = {}
     for group in groups:
-        for email in group:
-            seen.setdefault(email.strip().lower(), email.strip())
+        for value in group:
+            seen.setdefault(value.strip().lower(), value.strip())
     return list(seen.values())
 
 
@@ -218,103 +220,89 @@ async def run_flood_check(
     *,
     site_ids: list[str] | None = None,
     rain_threshold_in: float = DEFAULT_RAIN_THRESHOLD_IN,
-    extra_emails: list[str] | None = None,
+    send_texts: bool = False,
+    extra_phones: list[str] | None = None,
     notify_site_workers: bool = True,
-    only_newly_raised: bool = False,
 ) -> list[FloodCheckResult]:
-    """Assess sites, record alerts, and email warnings for at-risk sites.
+    """Assess sites and record alerts; with `send_texts`, text a warning for at-risk sites.
 
-    Each at-risk site emails `extra_emails` plus (if `notify_site_workers`) its attached
-    workers. With `only_newly_raised`, sites whose warning was already active send nothing.
+    Texts go to `extra_phones` (E.164) plus, if `notify_site_workers`, each at-risk site's
+    workers. Without `send_texts` nothing is sent.
     """
     sites = await load_sites(site_ids)
     assessments = await assess_sites(client, settings, sites, rain_threshold_in)
     await record_alerts(assessments)
 
-    to_notify = [a for a in assessments if a.at_risk and (a.newly_raised or not only_newly_raised)]
-    workers = await load_site_workers([a.site.id for a in to_notify]) if notify_site_workers else {}
-    outgoing: list[tuple[str, OutgoingEmail]] = [
-        (a.site.id, warning_email(a, to))
-        for a in to_notify
-        for to in recipients(extra_emails or [], workers.get(a.site.id, []))
-    ]
-    deliveries = await send_emails(settings, [email for _, email in outgoing])
+    texts: list[tuple[str, OutgoingSms]] = []
+    if send_texts:
+        at_risk = [a for a in assessments if a.at_risk]
+        workers = (
+            await load_site_workers([a.site.id for a in at_risk]) if notify_site_workers else {}
+        )
+        texts = [
+            (a.site.id, warning_sms(a, to))
+            for a in at_risk
+            for to in recipients(extra_phones or [], workers.get(a.site.id, []))
+        ]
+    results = await send_sms(client, settings, [m for _, m in texts])
 
     by_site: dict[str, list[DeliveryResult]] = {a.site.id: [] for a in assessments}
-    for (site_id, _), delivery in zip(outgoing, deliveries, strict=True):
+    for (site_id, _), delivery in zip(texts, results, strict=True):
         by_site[site_id].append(delivery)
     return [FloodCheckResult(a, by_site[a.site.id]) for a in assessments]
 
 
 async def flood_check_loop(client: httpx.AsyncClient, settings: Settings) -> None:
-    """Background task started by the app when FLOOD_CHECKS_ENABLED is true."""
+    """Background task started by the app when FLOOD_CHECKS_ENABLED is true.
+
+    Keeps flood alerts in the `alerts` table current (for the dashboard). Sends no messages.
+    """
     interval = settings.flood_check_interval_s
-    logger.info("Flood checks running every %ss", interval)
+    logger.info("Flood checks running every %ss (alerts only, no messages)", interval)
     while True:
         try:
             results = await run_flood_check(
-                client,
-                settings,
-                rain_threshold_in=settings.flood_rain_threshold_in,
-                only_newly_raised=True,
+                client, settings, rain_threshold_in=settings.flood_rain_threshold_in
             )
             for r in results:
-                if r.deliveries:
-                    sent = sum(d.status == "sent" for d in r.deliveries)
-                    logger.info(
-                        "Flood warning raised for site %s; emailed %s/%s workers",
-                        r.assessment.site.id,
-                        sent,
-                        len(r.deliveries),
-                    )
+                if r.assessment.newly_raised:
+                    logger.info("Flood alert raised for site %s", r.assessment.site.id)
         except Exception:
             logger.exception("Flood check failed; retrying next interval")
         await asyncio.sleep(interval)
 
 
-def warning_email(assessment: FloodAssessment, to: str) -> OutgoingEmail:
+def warning_sms(assessment: FloodAssessment, to: str) -> OutgoingSms:
+    """A short flood warning (at most two SMS segments, plain GSM characters)."""
     site = assessment.site
-    local_now = datetime.now(UTC).astimezone(ZoneInfo(site.timezone))
-    place = ", ".join(filter(None, [site.county, site.state]))
-    lines = [
-        f"FLOOD RISK WARNING - {site.name}",
-        f"Site {site.id}{f' ({place})' if place else ''}",
-        f"Issued {local_now:%a %b %d, %I:%M %p %Z}",
-        "",
-        "Why:",
-        *[f"  - {r}" for r in assessment.reasons],
-        "",
-        "Conditions:",
-        f"  - Rain, past 24 hours: {_inches(assessment.precip_24h_in)}",
-        f"  - Rain forecast tomorrow: {_inches(assessment.precip_tomorrow_in)}",
-    ]
-    if assessment.soil_moisture is not None:
-        saturated = " (saturated)" if assessment.soil_moisture >= SATURATED_SOIL else ""
-        lines.append(f"  - Soil moisture: {assessment.soil_moisture:.2f} m3/m3{saturated}")
-    for alert in assessment.nws_flood_alerts:
-        lines += ["", f"NWS {alert.event} ({alert.severity or 'unknown severity'}):"]
-        if alert.headline:
-            lines.append(f"  {alert.headline}")
-        if alert.instruction:
-            lines.append(f"  {alert.instruction.strip()}")
-    lines += [
-        "",
-        "Before work starts:",
-        "  - Check access roads and crossings; never drive through standing or moving water.",
-        "  - Expect soft ground: keep heavy equipment off saturated soil and mats near water.",
-        "  - Stage vehicles and equipment on high ground with a clear exit route.",
-        "  - Confirm the go/no-go call with your supervisor.",
-        "",
-        f"Map: https://www.google.com/maps?q={site.latitude},{site.longitude}",
-        "",
-        "-- SiteSentinel",
-    ]
-    return OutgoingEmail(
-        to=to,
-        subject=f"FLOOD RISK WARNING: {site.name}{f' ({site.state})' if site.state else ''}",
-        body="\n".join(lines),
-    )
+    flood = site.flood
+    if assessment.nws_flood_alerts:
+        why = [f"NWS {a.event} in effect" for a in assessment.nws_flood_alerts]
+    else:
+        why = []
+    rain = assessment.precip_24h_in
+    if rain is not None and any("rain in the past 24 hours" in r for r in assessment.reasons):
+        exposure = (
+            "site near river"
+            if site.near_river
+            else f"FEMA flood zone {flood.get('zone_at_site')}"
+            if flood.get("site_in_sfha")
+            else f"FEMA flood zone {flood.get('nearest_sfha_mi')} mi away"
+        )
+        why.append(f"{rain:.1f} in rain in 24h, {exposure}")
+    place = f"{site.name} ({site.state})" if site.state else site.name
+    action = "Avoid flooded roads; keep equipment on high ground."
+    link = f"Map: https://maps.google.com/?q={site.latitude},{site.longitude}"
+
+    body = f"FLOOD RISK: {place}. {'. '.join(why)}. {action} {link}"
+    while len(body) > SMS_MAX_CHARS and len(why) > 1:  # drop extra reasons before anything else
+        why.pop()
+        body = f"FLOOD RISK: {place}. {'. '.join(why)}. {action} {link}"
+    if len(body) > SMS_MAX_CHARS:
+        body = f"FLOOD RISK: {place}. {action} {link}"
+    return OutgoingSms(to=to, body=_gsm(body)[:SMS_MAX_CHARS])
 
 
-def _inches(value: float | None) -> str:
-    return "unavailable" if value is None else f"{value:.2f} in"
+def _gsm(text: str) -> str:
+    """Replace characters outside the basic SMS alphabet, which would halve the segment size."""
+    return text.translate(GSM_REPLACEMENTS)

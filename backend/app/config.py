@@ -28,16 +28,20 @@ class Settings(BaseSettings):
     # turn on in one deployed instance (or run scripts.record_conditions from cron instead).
     conditions_enabled: bool = False
     conditions_interval_s: int = 900  # Open-Meteo updates current weather every 15 minutes
-    # Outgoing email (flood warnings). Any SMTP provider works, e.g. Gmail with an app
-    # password (smtp.gmail.com:587), Outlook, SendGrid or Mailtrap for testing.
-    smtp_host: str | None = None
-    smtp_port: int = 587
-    smtp_username: str | None = None
-    smtp_password: str | None = None
-    smtp_from: str | None = None  # e.g. "SiteSentinel <alerts@example.com>"; defaults to username
-    smtp_starttls: bool = True  # STARTTLS on 587; set false and port 465 for implicit TLS
 
-    # Automated flood checks: email a site's workers when its flood warning is first raised.
+    # Outgoing SMS (flood warnings) through Twilio. Find the SID and token on the Twilio
+    # console home page. Send from a Twilio number, or from a Messaging Service instead.
+    twilio_account_sid: str | None = None
+    twilio_auth_token: str | None = None
+    twilio_from_number: str | None = None  # E.164, e.g. +12055550100
+    twilio_messaging_service_sid: str | None = None  # "MG..."; used instead of the from number
+    twilio_api_url: str = "https://api.twilio.com"
+    # Twilio trial accounts can only send predefined templates. When set, every text is sent
+    # with this template name as its body (e.g. "sms_internal_alerts") instead of the custom
+    # warning text. Remove it once the account is upgraded.
+    twilio_body_template: str | None = None
+
+    # Automated flood checks: keep flood alerts in the alerts table current. Sends no messages.
     # Off by default; turn on in exactly one deployed instance (like BRIEFINGS_ENABLED).
     flood_checks_enabled: bool = False
     flood_check_interval_s: int = 1800
