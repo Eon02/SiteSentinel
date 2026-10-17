@@ -1,0 +1,24 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "sitesentinel": {
+      "root": "sitesentinel",
+      "framework": "nextjs"
+    },
+    "backend": {
+      "root": "backend",
+      "framework": "fastapi",
+      "entrypoint": "app.main:app",
+      "routes": [
+        {
+          "src": "/backend/(.*)",
+          "transforms": [{ "type": "request.path", "op": "set", "args": "/$1" }]
+        }
+      ]
+    }
+  },
+  "rewrites": [
+    { "source": "/backend/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "sitesentinel" } }
+  ]
+}
