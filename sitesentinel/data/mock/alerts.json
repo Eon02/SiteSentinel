@@ -1,0 +1,18 @@
+[
+  {
+    "id": 1,
+    "siteId": "60001",
+    "type": "heat",
+    "severity": "warning",
+    "message": "Heat index 108°F. Mandatory water and shade breaks every 30 minutes.",
+    "startedAt": "2026-10-17T14:10:00Z"
+  },
+  {
+    "id": 2,
+    "siteId": "2050",
+    "type": "flood",
+    "severity": "warning",
+    "message": "Mississippi River above flood stage. Keep vehicles off low access roads.",
+    "startedAt": "2026-10-17T12:45:00Z"
+  }
+]
