@@ -1,16 +1,19 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
-import { ArrowDown, ArrowUp, Minus, Search, TriangleAlert } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { ArrowDown, ArrowUp, ChevronDown, Minus, Search, TriangleAlert } from 'lucide-react';
+import ConditionsSummary from './ConditionsSummary';
 import RiskBadge from './RiskBadge';
-import { formatScore } from '@/lib/risk';
-import type { Site } from '@/lib/types';
+import { OfflineNote, Skeleton } from './Skeleton';
+import { factorLabel, formatScore } from '@/lib/risk';
+import { usePolling } from '@/lib/usePolling';
+import type { Site, SiteDetail } from '@/lib/types';
 
 type Props = {
   sites: Site[];
   selectedId?: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
 };
 
 export default function SiteList({ sites, selectedId, onSelect }: Props) {
@@ -67,44 +70,104 @@ export default function SiteList({ sites, selectedId, onSelect }: Props) {
   );
 }
 
-function SiteRow({ site, rank, selected, onSelect }: { site: Site; rank: number; selected: boolean; onSelect: (id: string) => void }) {
+// The selected card is the expanded one; clicking it again collapses it.
+function SiteRow({ site, rank, selected, onSelect }: { site: Site; rank: number; selected: boolean; onSelect: (id: string | null) => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const panelId = `site-summary-${site.id}`;
+
+  // Selecting from the map expands this card; bring it into view.
+  useEffect(() => {
+    if (selected) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [selected]);
+
   return (
     <div
-      className={`flex items-center gap-3 rounded-lg border-2 bg-white p-2 pr-3 ${
-        selected ? 'border-[#E8590C]' : 'border-transparent'
-      }`}
+      ref={ref}
+      className={`rounded-lg border-2 bg-white ${selected ? 'border-[#E8590C]' : 'border-transparent'}`}
     >
-      <button
-        type="button"
-        onClick={() => onSelect(site.id)}
-        aria-pressed={selected}
-        className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left"
-      >
-        <span className="w-7 shrink-0 text-center text-lg font-extrabold text-slate-900">{rank}</span>
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5 font-bold text-slate-900">
-            <span className="truncate">{site.name}</span>
-            {site.activeAlertCount > 0 && (
-              <TriangleAlert
-                size={18}
-                className="shrink-0 text-[#C92A2A]"
-                aria-label={`${site.activeAlertCount} active alert${site.activeAlertCount === 1 ? '' : 's'}`}
-              />
-            )}
+      <div className="flex items-center gap-3 p-2 pr-3">
+        <button
+          type="button"
+          onClick={() => onSelect(selected ? null : site.id)}
+          aria-expanded={selected}
+          aria-controls={panelId}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left"
+        >
+          <span className="w-7 shrink-0 text-center text-lg font-extrabold text-slate-900">{rank}</span>
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5 font-bold text-slate-900">
+              <span className="truncate">{site.name}</span>
+              {site.activeAlertCount > 0 && (
+                <TriangleAlert
+                  size={18}
+                  className="shrink-0 text-[#C92A2A]"
+                  aria-label={`${site.activeAlertCount} active alert${site.activeAlertCount === 1 ? '' : 's'}`}
+                />
+              )}
+            </span>
+            <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-800">
+              <span>{site.state ?? '—'}</span>
+              <RiskBadge score={site.score} />
+              <Forecast today={site.score} tomorrow={site.forecastScore} />
+            </span>
           </span>
-          <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-slate-800">
-            <span>{site.state ?? '—'}</span>
-            <RiskBadge score={site.score} />
-            <Forecast today={site.score} tomorrow={site.forecastScore} />
-          </span>
-        </span>
-      </button>
-      <Link
-        href={`/site/${site.id}`}
-        className="flex h-11 shrink-0 items-center rounded-lg bg-[#16213E] px-3 text-sm font-bold text-white"
-      >
-        View site
-      </Link>
+          <ChevronDown
+            size={20}
+            aria-hidden
+            className={`shrink-0 text-slate-800 transition-transform ${selected ? 'rotate-180' : ''}`}
+          />
+        </button>
+        <Link
+          href={`/site/${site.id}`}
+          className="flex h-11 shrink-0 items-center rounded-lg bg-[#16213E] px-3 text-sm font-bold text-white"
+        >
+          View site
+        </Link>
+      </div>
+      {selected && (
+        <div id={panelId} className="border-t-2 border-slate-200 p-3">
+          <SiteSummary site={site} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Fetched only while expanded; refreshes with the site page's 15 s interval.
+function SiteSummary({ site }: { site: Site }) {
+  const { data, loading, offline } = usePolling<SiteDetail>(`/api/sites/${encodeURIComponent(site.id)}`, 15_000);
+
+  if (loading && !data) return <Skeleton className="h-36" />;
+  if (!data) return <OfflineNote show />;
+
+  const factors = [...data.site.topFactors].sort((a, b) => b.weight - a.weight).slice(0, 3);
+  return (
+    <div className="flex flex-col gap-3">
+      <OfflineNote show={offline} />
+      <div>
+        <h3 className="mb-2 text-sm font-bold uppercase tracking-wide text-slate-800">Current conditions</h3>
+        <ConditionsSummary conditions={data.conditions} timezone={site.timezone} compact />
+      </div>
+      {factors.length > 0 && (
+        <p className="text-sm text-slate-900">
+          <span className="font-bold">Top factors: </span>
+          {factors.map((f) => factorLabel(f.factor)).join(', ')}
+        </p>
+      )}
+      {data.alerts.length > 0 && (
+        <ul className="flex flex-col gap-1">
+          {data.alerts.map((a) => (
+            <li
+              key={a.id}
+              className={`rounded-md px-2 py-1 text-sm font-semibold ${
+                a.severity === 'stop_work' ? 'bg-[#C92A2A] text-white' : 'bg-[#F2C200] text-[#1A1A1A]'
+              }`}
+            >
+              {a.severity === 'stop_work' ? 'STOP WORK' : 'Warning'}: {a.message}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

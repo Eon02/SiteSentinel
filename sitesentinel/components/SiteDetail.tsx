@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { CloudRain, Sprout, Thermometer, Wind, type LucideIcon } from 'lucide-react';
+import ConditionsSummary from './ConditionsSummary';
 import FactorBars from './FactorBars';
 import HazardIcon from './HazardIcon';
 import LightningCountdown from './LightningCountdown';
@@ -102,26 +102,7 @@ export default function SiteDetail({ id }: { id: string }) {
 
         <section className="rounded-xl bg-white p-4">
           <h2 className="mb-3 text-xl font-bold">Current conditions</h2>
-          {conditions ? (
-            <>
-              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                <ConditionCard icon={Thermometer} label="Temperature" value={fmt(conditions.tempF, '°F')} />
-                <ConditionCard icon={Thermometer} label="Heat index" value={fmt(conditions.heatIndexF, '°F')} />
-                <ConditionCard icon={CloudRain} label="24-hr rain" value={fmt(conditions.precip24hIn, ' in', 1)} />
-                <ConditionCard
-                  icon={Sprout}
-                  label="Soil moisture"
-                  value={conditions.soilMoisture === undefined ? '—' : `${Math.round(conditions.soilMoisture * 100)}%`}
-                />
-                <ConditionCard icon={Wind} label="Wind" value={fmt(conditions.windMph, ' mph')} />
-              </div>
-              <p className="mt-2 text-sm text-slate-800">
-                Observed {new Date(conditions.observedAt).toLocaleString([], { timeZone: site.timezone, dateStyle: 'medium', timeStyle: 'short' })} site time
-              </p>
-            </>
-          ) : (
-            <p className="text-slate-800">No weather observations yet.</p>
-          )}
+          <ConditionsSummary conditions={conditions} timezone={site.timezone} />
         </section>
       </div>
 
@@ -164,21 +145,6 @@ export default function SiteDetail({ id }: { id: string }) {
           </ul>
         )}
       </section>
-    </div>
-  );
-}
-
-function fmt(v: number | undefined, unit: string, digits = 0) {
-  return v === undefined ? '—' : `${v.toFixed(digits)}${unit}`;
-}
-
-function ConditionCard({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
-  return (
-    <div className="rounded-lg bg-slate-100 p-3">
-      <div className="flex items-center gap-1 text-sm font-semibold text-slate-800">
-        <Icon size={16} aria-hidden /> {label}
-      </div>
-      <div className="text-2xl font-extrabold text-slate-900">{value}</div>
     </div>
   );
 }
