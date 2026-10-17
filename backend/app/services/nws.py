@@ -61,14 +61,28 @@ async def fetch_forecast(
     points = await _get(client, f"{base}/points/{point}", headers)
     props = points["properties"]
     forecast = await _get(client, props["forecast"], headers)
-    alerts = await _get(client, f"{base}/alerts/active", headers, {"point": point})
+    alerts = await fetch_active_alerts(client, base_url, user_agent, latitude, longitude)
 
     periods = [_period(p) for p in forecast["properties"]["periods"]]
     return NwsForecast(
         office=props.get("gridId", ""),
         periods=[p for p in periods if p.start_time.date() == day],
-        active_alerts=[_alert(f["properties"]) for f in alerts.get("features", [])],
+        active_alerts=alerts,
     )
+
+
+async def fetch_active_alerts(
+    client: httpx.AsyncClient,
+    base_url: str,
+    user_agent: str,
+    latitude: float,
+    longitude: float,
+) -> list[ActiveAlert]:
+    """NWS watches, warnings and advisories currently in effect at the coordinate."""
+    headers = {**HEADERS, "User-Agent": user_agent}
+    point = f"{latitude:.4f},{longitude:.4f}"
+    alerts = await _get(client, f"{base_url.rstrip('/')}/alerts/active", headers, {"point": point})
+    return [_alert(f["properties"]) for f in alerts.get("features", [])]
 
 
 async def _get(

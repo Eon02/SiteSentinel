@@ -23,6 +23,15 @@ class Settings(BaseSettings):
     briefing_webhook_token: str | None = None  # sent as "Authorization: Bearer <token>"
     briefing_hour: int = 18  # site-local hour when the scheduled briefing goes out
     briefing_check_interval_s: int = 300
+
+    # Outgoing email (flood warnings). Any SMTP provider works, e.g. Gmail with an app
+    # password (smtp.gmail.com:587), Outlook, SendGrid or Mailtrap for testing.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None  # e.g. "SiteSentinel <alerts@example.com>"; defaults to username
+    smtp_starttls: bool = True  # STARTTLS on 587; set false and port 465 for implicit TLS
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
         "http://localhost:5173",

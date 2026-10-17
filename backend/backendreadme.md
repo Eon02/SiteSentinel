@@ -158,6 +158,40 @@ These are recorded as `manual` and don't replace the scheduled 6 PM briefing. It
 **History.** Every briefing is stored in the `briefings` table with its full payload, `trigger`
 (`scheduled`/`manual`), `status` (`sent`/`failed`/`skipped`), attempts and last error.
 
+## Flood warnings by email
+
+`POST /alerts/flood` checks sites for flood risk after heavy rain and emails a warning to every address you pass:
+
+```bash
+curl -X POST localhost:8000/alerts/flood -H 'content-type: application/json'      -d '{"emails": ["supervisor@example.com", "crew-lead@example.com"]}'
+```
+
+| Field | Default | Purpose |
+| --- | --- | --- |
+| `emails` | required | 1-100 addresses; each gets its own email per at-risk site (duplicates removed) |
+| `site_ids` | all sites | Limit the check to these sites |
+| `rain_threshold_in` | `1.0` | Past-24h rain, in inches, that counts as heavy |
+
+A site is at risk when either:
+
+1. NWS has a flood product in effect there (Flood or Flash Flood Warning, Watch or Advisory, Coastal Flood, ...), or
+2. it had at least `rain_threshold_in` of rain in the past 24 hours (Open-Meteo) **and** it is exposed: `near_river`
+   is true, it is inside a FEMA high-risk zone, or one is within 0.5 miles (`site_flood_risk`).
+
+For each at-risk site the endpoint opens (or refreshes) an active `flood` alert in the `alerts` table and emails
+every address. The email covers the reasons, rain so far and tomorrow, soil saturation, any NWS instructions, and
+a safety checklist. Sites that are no longer at risk get their active flood alert cleared, but only when every
+data source answered, so an outage can't cancel a real warning. The response lists every site checked, with its
+numbers, reasons, `alert_id`, any `source_errors`, and the delivery status per address (`sent`, `failed`, or
+`skipped` when email isn't configured).
+
+Email goes out over SMTP; set `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD` and `SMTP_FROM` in
+`.env` (see `.env.example`; Gmail works with an app password). Use port 465 for implicit TLS, or
+`SMTP_STARTTLS=false` for a local test server such as `uv run python -m aiosmtpd -n -l 127.0.0.1:8025`, which
+prints received mail to the terminal.
+
+For a demo on a dry day, pass `"rain_threshold_in": 0`. Any river or floodplain site then counts as at risk.
+
 ## Everyday commands
 
 | Task | Command |
@@ -224,7 +258,7 @@ backend/
 │   ├── db.py          # async SQLAlchemy engine, Base, SessionDep
 │   ├── models.py      # ORM models matching the migrations
 │   ├── http.py        # shared outbound HTTP client
-│   ├── services/      # data clients (open_meteo, nws, fema_nfhl) and briefings
+│   ├── services/      # data clients (open_meteo, nws, fema_nfhl), briefings, flood warnings, email
 │   └── routers/       # one module per API area
 ├── database/
 │   ├── migrate.py     # applies migrations/ to DATABASE_URL

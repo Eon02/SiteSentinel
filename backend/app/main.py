@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import engine
-from app.routers import briefings, health, sites, weather
+from app.routers import alerts, briefings, health, sites, weather
 from app.services.briefings import scheduler_loop
 
 # Show the app's own INFO logs (e.g. briefings sent) alongside uvicorn's.
@@ -47,3 +47,4 @@ app.include_router(health.router)
 app.include_router(sites.router)
 app.include_router(weather.router)
 app.include_router(briefings.router)
+app.include_router(alerts.router)
