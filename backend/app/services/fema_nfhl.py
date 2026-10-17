@@ -21,12 +21,13 @@ OUT_FIELDS = [
     "DEPTH",
     "LEN_UNIT",
 ]
-PAGE_SIZE = 1000  # the service caps pages at 2000; smaller pages keep large polygons manageable
+PAGE_SIZE = 100  # small pages: a page of large polygons can make FEMA time out (HTTP 500)
+MAX_ALLOWABLE_OFFSET_DEG = 0.00003  # ~3 m
 NO_VALUE = -9999  # FEMA's placeholder for "not applicable"
 
 # FEMA's server is slow and occasionally stalls, so allow long reads and retry.
 TIMEOUT = httpx.Timeout(120.0, connect=20.0)
-RETRIES = 3
+RETRIES = 5
 
 
 class FemaNfhlError(Exception):
@@ -68,6 +69,10 @@ async def fetch_flood_zones(
         "returnGeometry": "true",
         "outSR": 4326,
         "geometryPrecision": 6,  # ~0.1 m
+        # Let FEMA drop vertices closer than ~3 m. Some zone polygons have hundreds of
+        # thousands of vertices (several MB each); this shrinks them with no visible change
+        # at site scale.
+        "maxAllowableOffset": MAX_ALLOWABLE_OFFSET_DEG,
         "orderByFields": "OBJECTID",
         "resultRecordCount": PAGE_SIZE,
         "f": "geojson",

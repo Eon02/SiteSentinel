@@ -158,6 +158,30 @@ These are recorded as `manual` and don't replace the scheduled 6 PM briefing. It
 **History.** Every briefing is stored in the `briefings` table with its full payload, `trigger`
 (`scheduled`/`manual`), `status` (`sent`/`failed`/`skipped`), attempts and last error.
 
+## Importing sites from a spreadsheet
+
+Load an EIA-860M style `.xlsx` (the "Operating" sheet, or any sheet with the same columns) into `sites`:
+
+```bash
+uv run python -m scripts.import_sites path/to/sheet.xlsx --dry-run   # preview, writes nothing
+uv run python -m scripts.import_sites path/to/sheet.xlsx             # add new sites
+uv run python -m scripts.import_sites path/to/sheet.xlsx --update    # also overwrite existing ids
+```
+
+- Needs the columns `Plant ID`, `Plant Name`, `Plant State`, `Latitude` and `Longitude`. `Entity Name`, `County`,
+  `Technology` and `Nameplate Capacity (MW)` are used when present.
+- EIA lists one row per generator, so rows are grouped by Plant ID. The plant type is the technology of its largest
+  generator.
+- `timezone` is looked up offline from the coordinates (`timezonefinder`). State alone isn't enough; El Paso, TX,
+  for example, is on Mountain time.
+- `near_river` is true for hydroelectric plants, or when a river of stream order 5 or more (a sizable river, not a
+  creek) runs within 1 mile, per the USGS National Hydrography Dataset. The output names the river for each
+  site. If a USGS lookup fails, that site falls back to the hydro rule and the output says so. Use
+  `--no-river-check` to skip USGS entirely.
+- Every row is validated like `POST /sites`; invalid rows are listed as skipped, not imported.
+
+After importing, run `uv run python -m scripts.load_flood_zones` to load FEMA flood zones for the new sites.
+
 ## Site workers
 
 Each site (project) has a list of worker emails in the `site_workers` table. Flood warnings for a site go to
@@ -236,6 +260,7 @@ For a demo on a dry day, pass `"rain_threshold_in": 0`. Any river or floodplain 
 | Add a dev-only package | `uv add --dev <package>` |
 | Sync after pulling | `uv sync` |
 | Apply database migrations | `uv run python -m database.migrate` |
+| Import sites from a spreadsheet | `uv run python -m scripts.import_sites sheet.xlsx` |
 | Load FEMA flood zones | `uv run python -m scripts.load_flood_zones` |
 | Run tests | `uv run pytest` |
 | Lint / format | `uv run ruff check .` / `uv run ruff format .` |
@@ -249,7 +274,7 @@ hand in the dashboard.
 
 - `database/migrations/*.sql` are applied in filename order by `uv run python -m database.migrate`. Each file runs
   once, in a transaction, and is recorded in `public.schema_migrations`.
-- To change the schema, add a new file with the next number (e.g. `0007_add_wildfire_table.sql`), run the migrate
+- To change the schema, add a new file with the next number (e.g. `0008_add_wildfire_table.sql`), run the migrate
   command, and commit the file. Never edit a migration that has already been applied; add a new one instead.
 - `0001_enable_postgis.sql` enables PostGIS in Supabase's `extensions` schema.
 - `0002_create_core_tables.sql` creates the core tables, with spatial indexes on the `geom` columns:
@@ -257,7 +282,7 @@ hand in the dashboard.
 | Table | Holds | Written by |
 | --- | --- | --- |
 | `sites` | Job sites from EIA-860M (location, timezone, near-river flag) | seed script |
-| `conditions` | Weather observations per site and time | worker |
+| `conditions` | Weather observations per site and time (temperature, heat index, 24h rain, soil moisture, wind, gusts, humidity) | worker |
 | `hazard_scores` | ML hazard index (0-10) per site per day, today and forecast | model |
 | `alerts` | Active (`cleared_at` null) and past alerts | worker, demo endpoint |
 | `hazard_reports` | Crew-pinned hazards with optional photo | frontend, via the API |
@@ -269,6 +294,8 @@ hand in the dashboard.
 - `0005_create_briefings.sql` adds the `briefings` table (see [Next-day briefings](#next-day-briefings-6-pm)).
 - `0006_create_site_workers.sql` adds `site_workers` (see [Site workers](#site-workers)) and allows only one
   active flood alert per site.
+- `0007_add_conditions_gust_humidity.sql` adds `wind_gust_mph` and `humidity_pct` (relative humidity, 0-100) to
+  `conditions`.
 
 Row Level Security is on for every table with no policies, so Supabase's public REST API (the anon key) can't
 read or write them. The backend connects as the database owner and isn't affected. If the frontend should talk
@@ -302,6 +329,7 @@ backend/
 │   ├── migrate.py     # applies migrations/ to DATABASE_URL
 │   └── migrations/    # numbered SQL files, applied in order
 ├── scripts/
+│   ├── import_sites.py      # EIA-860M spreadsheet -> sites
 │   └── load_flood_zones.py  # FEMA flood zones -> PostGIS
 ├── tests/
 ├── pyproject.toml     # dependencies (managed by uv)

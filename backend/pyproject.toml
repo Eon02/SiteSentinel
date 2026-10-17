@@ -10,8 +10,10 @@ dependencies = [
     "fastapi[standard]>=0.143.3",
     "geoalchemy2>=0.20.0",
     "httpx>=0.28.1",
+    "openpyxl>=3.1.5",
     "pydantic-settings>=2.16.0",
     "sqlalchemy[asyncio]>=2.1.5",
+    "timezonefinder>=9.0.0",
     "tzdata>=2026.5",
 ]
 

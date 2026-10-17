@@ -82,9 +82,9 @@ def test_retries_server_errors_then_fails(monkeypatch: pytest.MonkeyPatch) -> No
         calls.append(request)
         return httpx.Response(503)
 
-    with pytest.raises(FemaNfhlError, match="after 3 attempts"):
+    with pytest.raises(FemaNfhlError, match=f"after {fema_nfhl.RETRIES} attempts"):
         run(handler)
-    assert len(calls) == 3
+    assert len(calls) == fema_nfhl.RETRIES
 
 
 def test_service_error_is_not_retried() -> None:

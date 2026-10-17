@@ -50,6 +50,8 @@ class Condition(Base):
     precip_24h_in: Mapped[float | None] = mapped_column(REAL)
     soil_moisture: Mapped[float | None] = mapped_column(REAL)
     wind_mph: Mapped[float | None] = mapped_column(REAL)
+    wind_gust_mph: Mapped[float | None] = mapped_column(REAL)
+    humidity_pct: Mapped[float | None] = mapped_column(REAL)  # relative humidity, 0-100
 
 
 class HazardScore(Base):
