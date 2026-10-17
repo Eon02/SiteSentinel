@@ -38,8 +38,8 @@ Save this spec as `SPEC.md` in the repo root. Ask Claude Code to build one miles
 **Setup commands**
 
 ```bash
-npx create-next-app@latest planit-control --typescript --tailwind --app --eslint
-cd planit-control
+npx create-next-app@latest sitesentinel --typescript --tailwind --app --eslint
+cd sitesentinel
 npm install maplibre-gl react-map-gl postgres zod @vercel/blob lucide-react
 ```
 
@@ -182,7 +182,7 @@ Every page and API route gets data only through `lib/data.ts`. When `USE_MOCK=tr
 
 **Functions `lib/data.ts` must export**
 
-```ts
+```text
 getSites(): Promise<Site[]>                          // sorted by score, highest first
 getSite(id: string): Promise<{
   site: Site; conditions?: Conditions;
@@ -240,7 +240,7 @@ The map component converts `Site[]` into a GeoJSON `FeatureCollection` on the cl
 
 **Global layout**
 
-- Header with "PlanIT Control" (navy `#16213E` and orange `#E8590C`, matching the challenge branding), links to Dashboard and Report Hazard, and the `AlertBanner`.
+- Header with "SiteSentinel" (navy `#16213E` and orange `#E8590C`, matching the challenge branding), links to Dashboard and Report Hazard, and the `AlertBanner`.
 - `AlertBanner` polls `/api/alerts` and shows a red bar for each `stop_work` alert and an amber bar for each warning, with the site name. Clicking it opens that site. Lightning alerts include the `LightningCountdown`.
 
 **Dashboard (`/`)**

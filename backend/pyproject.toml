@@ -1,7 +1,7 @@
 [project]
 name = "sitesentinel-backend"
 version = "0.1.0"
-description = "FastAPI backend for SiteSentinel (PlanIT Control) job-site hazard monitoring"
+description = "FastAPI backend for SiteSentinel job-site hazard monitoring"
 readme = "backendreadme.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [

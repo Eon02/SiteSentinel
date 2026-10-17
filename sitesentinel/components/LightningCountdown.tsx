@@ -13,8 +13,8 @@ function formatMmSs(ms: number) {
 }
 
 // Counts down locally every second from lastStrikeAt; never polls for the time.
-// At zero it shows "All clear" for 10 s, then clears the alert on the server.
-export default function LightningCountdown({ alert, compact = false }: { alert: Alert; compact?: boolean }) {
+// Once "All clear" has shown for 10 s, clears the alert on the server. Returns ms remaining.
+function useLightningCountdown(alert: Alert): number {
   const demoSpeed = useDemoSpeed();
   const [now, setNow] = useState(() => Date.now());
   const clearedFor = useRef<string | null>(null);
@@ -36,6 +36,18 @@ export default function LightningCountdown({ alert, compact = false }: { alert: 
       clearedFor.current = null; // retry on the next tick
     });
   }, [remaining, strikeKey, alert.id]);
+
+  return remaining;
+}
+
+// Keeps the countdown (and its server clear) running for an alert whose banner was dismissed.
+export function LightningAutoClear({ alert }: { alert: Alert }) {
+  useLightningCountdown(alert);
+  return null;
+}
+
+export default function LightningCountdown({ alert, compact = false }: { alert: Alert; compact?: boolean }) {
+  const remaining = useLightningCountdown(alert);
 
   if (remaining <= 0) {
     return (

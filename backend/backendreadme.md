@@ -75,6 +75,26 @@ Invalid coordinates return 422; if Open-Meteo is down or rejects the request, th
 can call `app.services.open_meteo.fetch_weather` directly. The base URL is configurable with `OPEN_METEO_URL`
 (e.g. for Open-Meteo's paid commercial endpoint).
 
+## Conditions worker
+
+Records each site's current weather into the `conditions` table, which the frontend shows on the dashboard and
+site pages.
+
+```bash
+uv run python -m scripts.record_conditions                    # every site, once
+uv run python -m scripts.record_conditions --site 6145        # specific sites (repeatable)
+```
+
+To record continuously, set `CONDITIONS_ENABLED=true` on the one deployed instance that should do it. The API then
+records every `CONDITIONS_INTERVAL_S` seconds (default 900, Open-Meteo's 15-minute update interval). Running the
+script from cron works too.
+
+- One row per site per Open-Meteo observation time. Re-running within the same 15 minutes updates that row.
+- A site whose weather can't be fetched is reported; the rest are still stored.
+- `soil_moisture` is stored as a **0-1 saturation fraction**, not Open-Meteo's raw volumetric value (m³/m³, 0 to
+  ~0.5 in the top 1 cm). The worker divides by 0.5 (typical saturated soil) and caps at 1, so 0.38 m³/m³ is
+  stored as 0.76. The `/weather` endpoint and briefings still report the raw volumetric value.
+
 ## Flood zones (FEMA NFHL)
 
 FEMA flood hazard zones from the [National Flood Hazard Layer](https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer)
@@ -262,6 +282,7 @@ For a demo on a dry day, pass `"rain_threshold_in": 0`. Any river or floodplain 
 | Apply database migrations | `uv run python -m database.migrate` |
 | Import sites from a spreadsheet | `uv run python -m scripts.import_sites sheet.xlsx` |
 | Load FEMA flood zones | `uv run python -m scripts.load_flood_zones` |
+| Record current conditions | `uv run python -m scripts.record_conditions` |
 | Run tests | `uv run pytest` |
 | Lint / format | `uv run ruff check .` / `uv run ruff format .` |
 
@@ -292,6 +313,8 @@ hand in the dashboard.
 - `0004_flood_risk_unknown_when_unmapped.sql` makes `site_flood_risk` report unknown (null) instead of
   "not in SFHA" for unmapped or unloaded sites, and adds `fema_mapped`.
 - `0005_create_briefings.sql` adds the `briefings` table (see [Next-day briefings](#next-day-briefings-6-pm)).
+- `0006_document_soil_saturation.sql` documents `conditions.soil_moisture` as a 0-1 saturation fraction (see
+  [Conditions worker](#conditions-worker)).
 - `0006_create_site_workers.sql` adds `site_workers` (see [Site workers](#site-workers)) and allows only one
   active flood alert per site.
 - `0007_add_conditions_gust_humidity.sql` adds `wind_gust_mph` and `humidity_pct` (relative humidity, 0-100) to

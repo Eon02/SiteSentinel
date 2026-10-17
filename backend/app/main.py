@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.db import engine
 from app.routers import alerts, briefings, health, sites, weather
 from app.services.briefings import scheduler_loop
+from app.services.conditions import conditions_loop
 from app.services.flood_warnings import flood_check_loop
 
 # Show the app's own INFO logs (e.g. briefings sent) alongside uvicorn's.
@@ -24,6 +25,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     async with httpx.AsyncClient(timeout=10.0) as http_client:
         app.state.http_client = http_client
+        settings = get_settings()
+        tasks = []
+        if settings.briefings_enabled:
+            tasks.append(asyncio.create_task(scheduler_loop(http_client)))
+        if settings.conditions_enabled:
+            tasks.append(asyncio.create_task(conditions_loop(http_client)))
+        yield
+        for task in tasks:
         background = []
         if settings.briefings_enabled:
             background.append(asyncio.create_task(scheduler_loop(http_client)))

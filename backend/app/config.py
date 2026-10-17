@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     briefing_hour: int = 18  # site-local hour when the scheduled briefing goes out
     briefing_check_interval_s: int = 300
 
+    # Conditions worker: records current weather per site into `conditions`. Off by default;
+    # turn on in one deployed instance (or run scripts.record_conditions from cron instead).
+    conditions_enabled: bool = False
+    conditions_interval_s: int = 900  # Open-Meteo updates current weather every 15 minutes
     # Outgoing email (flood warnings). Any SMTP provider works, e.g. Gmail with an app
     # password (smtp.gmail.com:587), Outlook, SendGrid or Mailtrap for testing.
     smtp_host: str | None = None
