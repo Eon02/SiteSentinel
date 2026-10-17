@@ -1,17 +1,20 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import engine
-from app.routers import health
+from app.routers import health, weather
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    yield
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    async with httpx.AsyncClient(timeout=10.0) as http_client:
+        app.state.http_client = http_client
+        yield
     await engine.dispose()
 
 
@@ -26,3 +29,4 @@ app.add_middleware(
 )
 
 app.include_router(health.router)
+app.include_router(weather.router)

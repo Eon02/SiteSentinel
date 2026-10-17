@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     # Supabase connection string (Project Settings -> Database -> Connection string).
     # Plain "postgresql://" URLs are accepted and converted to the asyncpg driver.
     database_url: str
+    open_meteo_url: str = "https://api.open-meteo.com/v1/forecast"
+    fema_nfhl_url: str = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
         "http://localhost:5173",
