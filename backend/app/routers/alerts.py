@@ -1,30 +1,25 @@
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.config import get_settings
 from app.http import HttpClientDep
-from app.services.briefings import load_sites
-from app.services.email import send_emails
-from app.services.flood_warnings import (
-    DEFAULT_RAIN_THRESHOLD_IN,
-    assess_sites,
-    record_alerts,
-    warning_email,
-)
+from app.services.flood_warnings import DEFAULT_RAIN_THRESHOLD_IN, recipients, run_flood_check
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
 
 
 class FloodWarningRequest(BaseModel):
-    model_config = {
-        "json_schema_extra": {
-            "example": {"emails": ["supervisor@example.com", "crew-lead@example.com"]}
-        }
-    }
+    model_config = {"json_schema_extra": {"example": {"emails": ["supervisor@example.com"]}}}
 
-    emails: Annotated[list[EmailStr], Field(min_length=1, max_length=100)]
+    emails: Annotated[list[EmailStr], Field(max_length=100)] = Field(
+        default_factory=list,
+        description="Extra addresses to warn, on top of each at-risk site's attached workers",
+    )
+    notify_site_workers: bool = Field(
+        default=True, description="Also email the workers attached to each at-risk site"
+    )
     site_ids: list[str] | None = Field(default=None, description="Sites to check; omit for all")
     rain_threshold_in: float = Field(
         default=DEFAULT_RAIN_THRESHOLD_IN,
@@ -32,13 +27,12 @@ class FloodWarningRequest(BaseModel):
         description="Past-24h rain (inches) that counts as heavy for river/floodplain sites",
     )
 
-    @field_validator("emails")
-    @classmethod
-    def dedupe(cls, emails: list[str]) -> list[str]:
-        seen: dict[str, str] = {}
-        for email in emails:
-            seen.setdefault(email.lower(), email)
-        return list(seen.values())
+    @model_validator(mode="after")
+    def has_recipients(self) -> "FloodWarningRequest":
+        if not self.emails and not self.notify_site_workers:
+            raise ValueError("Give emails, or leave notify_site_workers on")
+        self.emails = recipients(self.emails)
+        return self
 
 
 class EmailDelivery(BaseModel):
@@ -57,6 +51,7 @@ class SiteFloodResult(BaseModel):
     soil_moisture: float | None
     nws_flood_alerts: list[str]
     alert_id: int | None
+    newly_raised: bool
     source_errors: dict[str, str]
     emails: list[EmailDelivery]
 
@@ -65,27 +60,22 @@ class SiteFloodResult(BaseModel):
 async def send_flood_warnings(
     body: FloodWarningRequest, client: HttpClientDep
 ) -> list[SiteFloodResult]:
-    """Check sites for flood risk after heavy rain and email a warning to every address.
+    """Check sites for flood risk after heavy rain and email a warning for each at-risk site.
 
-    Each at-risk site sends one email per address. Sites not at risk send nothing, and any
-    active flood alert they had is cleared. Every site checked is listed in the response.
+    Each at-risk site emails every worker attached to it (see /sites/{id}/workers) plus any
+    `emails` given, one email per address. Sites not at risk send nothing, and any active
+    flood alert they had is cleared. Every site checked is listed in the response.
     """
-    settings = get_settings()
-    sites = await load_sites(body.site_ids)
-    if body.site_ids and not sites:
+    results = await run_flood_check(
+        client,
+        get_settings(),
+        site_ids=body.site_ids,
+        rain_threshold_in=body.rain_threshold_in,
+        extra_emails=body.emails,
+        notify_site_workers=body.notify_site_workers,
+    )
+    if body.site_ids and not results:
         raise HTTPException(status_code=404, detail="None of the given site ids exist")
-
-    assessments = await assess_sites(client, settings, sites, body.rain_threshold_in)
-    await record_alerts(assessments)
-
-    pairs = [(a.site.id, to) for a in assessments if a.at_risk for to in body.emails]
-    outgoing = [warning_email(a, to) for a in assessments if a.at_risk for to in body.emails]
-    deliveries = await send_emails(settings, outgoing)
-
-    by_site: dict[str, list[EmailDelivery]] = {a.site.id: [] for a in assessments}
-    for (site_id, _), d in zip(pairs, deliveries, strict=True):
-        by_site[site_id].append(EmailDelivery(to=d.to, status=d.status, error=d.error))
-
     return [
         SiteFloodResult(
             site_id=a.site.id,
@@ -97,8 +87,10 @@ async def send_flood_warnings(
             soil_moisture=a.soil_moisture,
             nws_flood_alerts=[alert.event for alert in a.nws_flood_alerts],
             alert_id=a.alert_id,
+            newly_raised=a.newly_raised,
             source_errors=a.source_errors,
-            emails=by_site[a.site.id],
+            emails=[EmailDelivery(to=d.to, status=d.status, error=d.error) for d in r.deliveries],
         )
-        for a in assessments
+        for r in results
+        for a in [r.assessment]
     ]

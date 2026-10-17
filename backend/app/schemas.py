@@ -3,7 +3,7 @@
 from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, StringConstraints, field_validator
 
 NonEmpty = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
@@ -51,3 +51,20 @@ class SiteCreate(BaseModel):
 
 class SiteOut(SiteCreate):
     pass
+
+
+class WorkerCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {"email": "crew-lead@example.com", "name": "Sam Rivera", "role": "crew lead"}
+        }
+    )
+
+    email: EmailStr
+    name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
+    role: Annotated[str, StringConstraints(strip_whitespace=True, max_length=100)] | None = None
+
+
+class WorkerOut(WorkerCreate):
+    id: int
+    site_id: str

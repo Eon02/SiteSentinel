@@ -8,9 +8,14 @@ A site is at flood risk when either:
 
 Assessed sites get a row in `alerts` (type 'flood'); sites no longer at risk have their
 active flood alert cleared.
+
+Warnings are emailed to every worker attached to the site (`site_workers`), plus any extra
+addresses given. The manual check (POST /alerts/flood) emails on every call; the automated
+check (FLOOD_CHECKS_ENABLED) emails only when a site's warning is first raised.
 """
 
 import asyncio
+import logging
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -20,8 +25,8 @@ from sqlalchemy import text
 
 from app.config import Settings
 from app.db import SessionLocal
-from app.services.briefings import SiteInfo
-from app.services.email import OutgoingEmail
+from app.services.briefings import SiteInfo, load_sites
+from app.services.email import DeliveryResult, OutgoingEmail, send_emails
 from app.services.nws import ActiveAlert, NwsError, fetch_active_alerts
 from app.services.open_meteo import OpenMeteoError, WeatherReport, fetch_weather
 
@@ -29,6 +34,8 @@ DEFAULT_RAIN_THRESHOLD_IN = 1.0
 SFHA_NEARBY_MI = 0.5
 SATURATED_SOIL = 0.4  # m³/m³ in the top 1 cm; above this the ground takes little more water
 CONCURRENT_SITES = 5
+
+logger = logging.getLogger("sitesentinel.flood")
 
 
 @dataclass
@@ -42,6 +49,7 @@ class FloodAssessment:
     nws_flood_alerts: list[ActiveAlert]
     source_errors: dict[str, str] = field(default_factory=dict)
     alert_id: int | None = None
+    newly_raised: bool = False  # this check opened the site's flood alert (it wasn't active)
 
     @property
     def complete(self) -> bool:
@@ -138,32 +146,29 @@ async def assess_sites(
 
 
 async def record_alerts(assessments: list[FloodAssessment]) -> None:
-    """Open or refresh a flood alert for each at-risk site; clear it for sites that recovered."""
+    """Open or refresh a flood alert for each at-risk site; clear it for sites that recovered.
+
+    Sets `alert_id`, and `newly_raised` when the alert didn't exist yet. The unique index
+    alerts_one_active_flood makes this safe when several instances check at once.
+    """
     async with SessionLocal() as session, session.begin():
         for a in assessments:
             if a.at_risk:
-                message = "Flood risk: " + "; ".join(a.reasons)
-                a.alert_id = await session.scalar(
-                    text(
-                        """
-                        UPDATE alerts SET message = :message
-                        WHERE site_id = :site_id AND type = 'flood' AND cleared_at IS NULL
-                        RETURNING id
-                        """
-                    ),
-                    {"site_id": a.site.id, "message": message},
-                )
-                if a.alert_id is None:
-                    a.alert_id = await session.scalar(
+                row = (
+                    await session.execute(
                         text(
                             """
                             INSERT INTO alerts (site_id, type, severity, message)
                             VALUES (:site_id, 'flood', 'warning', :message)
-                            RETURNING id
+                            ON CONFLICT (site_id) WHERE type = 'flood' AND cleared_at IS NULL
+                            DO UPDATE SET message = EXCLUDED.message
+                            RETURNING id, (xmax = 0) AS inserted
                             """
                         ),
-                        {"site_id": a.site.id, "message": message},
+                        {"site_id": a.site.id, "message": "Flood risk: " + "; ".join(a.reasons)},
                     )
+                ).one()
+                a.alert_id, a.newly_raised = row.id, row.inserted
             elif a.complete:
                 # Only clear on a full assessment, so an outage doesn't cancel a real warning.
                 await session.execute(
@@ -175,6 +180,96 @@ async def record_alerts(assessments: list[FloodAssessment]) -> None:
                     ),
                     {"site_id": a.site.id},
                 )
+
+
+async def load_site_workers(site_ids: list[str]) -> dict[str, list[str]]:
+    """Worker emails attached to each site."""
+    if not site_ids:
+        return {}
+    async with SessionLocal() as session:
+        rows = await session.execute(
+            text("SELECT site_id, email FROM site_workers WHERE site_id = ANY(:ids) ORDER BY id"),
+            {"ids": site_ids},
+        )
+    workers: dict[str, list[str]] = {}
+    for site_id, email in rows:
+        workers.setdefault(site_id, []).append(email)
+    return workers
+
+
+def recipients(*groups: list[str]) -> list[str]:
+    """Merge address lists in order, dropping case-insensitive duplicates."""
+    seen: dict[str, str] = {}
+    for group in groups:
+        for email in group:
+            seen.setdefault(email.strip().lower(), email.strip())
+    return list(seen.values())
+
+
+@dataclass
+class FloodCheckResult:
+    assessment: FloodAssessment
+    deliveries: list[DeliveryResult]
+
+
+async def run_flood_check(
+    client: httpx.AsyncClient,
+    settings: Settings,
+    *,
+    site_ids: list[str] | None = None,
+    rain_threshold_in: float = DEFAULT_RAIN_THRESHOLD_IN,
+    extra_emails: list[str] | None = None,
+    notify_site_workers: bool = True,
+    only_newly_raised: bool = False,
+) -> list[FloodCheckResult]:
+    """Assess sites, record alerts, and email warnings for at-risk sites.
+
+    Each at-risk site emails `extra_emails` plus (if `notify_site_workers`) its attached
+    workers. With `only_newly_raised`, sites whose warning was already active send nothing.
+    """
+    sites = await load_sites(site_ids)
+    assessments = await assess_sites(client, settings, sites, rain_threshold_in)
+    await record_alerts(assessments)
+
+    to_notify = [a for a in assessments if a.at_risk and (a.newly_raised or not only_newly_raised)]
+    workers = await load_site_workers([a.site.id for a in to_notify]) if notify_site_workers else {}
+    outgoing: list[tuple[str, OutgoingEmail]] = [
+        (a.site.id, warning_email(a, to))
+        for a in to_notify
+        for to in recipients(extra_emails or [], workers.get(a.site.id, []))
+    ]
+    deliveries = await send_emails(settings, [email for _, email in outgoing])
+
+    by_site: dict[str, list[DeliveryResult]] = {a.site.id: [] for a in assessments}
+    for (site_id, _), delivery in zip(outgoing, deliveries, strict=True):
+        by_site[site_id].append(delivery)
+    return [FloodCheckResult(a, by_site[a.site.id]) for a in assessments]
+
+
+async def flood_check_loop(client: httpx.AsyncClient, settings: Settings) -> None:
+    """Background task started by the app when FLOOD_CHECKS_ENABLED is true."""
+    interval = settings.flood_check_interval_s
+    logger.info("Flood checks running every %ss", interval)
+    while True:
+        try:
+            results = await run_flood_check(
+                client,
+                settings,
+                rain_threshold_in=settings.flood_rain_threshold_in,
+                only_newly_raised=True,
+            )
+            for r in results:
+                if r.deliveries:
+                    sent = sum(d.status == "sent" for d in r.deliveries)
+                    logger.info(
+                        "Flood warning raised for site %s; emailed %s/%s workers",
+                        r.assessment.site.id,
+                        sent,
+                        len(r.deliveries),
+                    )
+        except Exception:
+            logger.exception("Flood check failed; retrying next interval")
+        await asyncio.sleep(interval)
 
 
 def warning_email(assessment: FloodAssessment, to: str) -> OutgoingEmail:
