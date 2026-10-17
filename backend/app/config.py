@@ -28,6 +28,20 @@ class Settings(BaseSettings):
     # turn on in one deployed instance (or run scripts.record_conditions from cron instead).
     conditions_enabled: bool = False
     conditions_interval_s: int = 900  # Open-Meteo updates current weather every 15 minutes
+    # Outgoing email (flood warnings). Any SMTP provider works, e.g. Gmail with an app
+    # password (smtp.gmail.com:587), Outlook, SendGrid or Mailtrap for testing.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None  # e.g. "SiteSentinel <alerts@example.com>"; defaults to username
+    smtp_starttls: bool = True  # STARTTLS on 587; set false and port 465 for implicit TLS
+
+    # Automated flood checks: email a site's workers when its flood warning is first raised.
+    # Off by default; turn on in exactly one deployed instance (like BRIEFINGS_ENABLED).
+    flood_checks_enabled: bool = False
+    flood_check_interval_s: int = 1800
+    flood_rain_threshold_in: float = 1.0
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
         "http://localhost:5173",

@@ -50,6 +50,8 @@ class Condition(Base):
     precip_24h_in: Mapped[float | None] = mapped_column(REAL)
     soil_moisture: Mapped[float | None] = mapped_column(REAL)
     wind_mph: Mapped[float | None] = mapped_column(REAL)
+    wind_gust_mph: Mapped[float | None] = mapped_column(REAL)
+    humidity_pct: Mapped[float | None] = mapped_column(REAL)  # relative humidity, 0-100
 
 
 class HazardScore(Base):
@@ -133,3 +135,16 @@ class Briefing(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SiteWorker(Base):
+    """A worker attached to a site; receives that site's flood warnings by email."""
+
+    __tablename__ = "site_workers"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
+    email: Mapped[str] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -21,7 +21,7 @@ from app.db import SessionLocal, engine
 from app.services.fema_nfhl import FemaNfhlError, FloodZoneFeature, fetch_flood_zones
 
 METERS_PER_MILE = 1609.344
-CONCURRENT_REQUESTS = 3  # stay gentle on FEMA's server
+CONCURRENT_REQUESTS = 2  # stay gentle on FEMA's server; it returns 500s under load
 
 INSERT_ZONE = text(
     """
@@ -93,6 +93,9 @@ async def load(site_ids: list[str] | None, radius_mi: float) -> int:
 
     base_url = get_settings().fema_nfhl_url
     limit = asyncio.Semaphore(CONCURRENT_REQUESTS)
+    # One database write at a time: clipping large polygons is slow, and parallel writes
+    # can exhaust Supabase's session pooler (ECHECKOUTTIMEOUT).
+    db_lock = asyncio.Lock()
     failures = 0
 
     async def load_site(client: httpx.AsyncClient, site_id: str, lat: float, lon: float) -> None:
@@ -100,17 +103,21 @@ async def load(site_ids: list[str] | None, radius_mi: float) -> int:
         try:
             async with limit:
                 zones = await fetch_flood_zones(client, base_url, lat, lon, radius_mi)
-            stored = await store_site_zones(site_id, zones, radius_mi)
-            print(f"{site_id}: {stored} flood zones stored ({len(zones)} fetched)")
+            async with db_lock:
+                stored = await store_site_zones(site_id, zones, radius_mi)
+            print(f"{site_id}: {stored} flood zones stored ({len(zones)} fetched)", flush=True)
         except FemaNfhlError as exc:
             failures += 1
-            print(f"{site_id}: FAILED - {exc}")
+            print(f"{site_id}: FAILED - {exc}", flush=True)
+        except Exception as exc:  # one site's database error must not abort the others
+            failures += 1
+            print(f"{site_id}: FAILED - {type(exc).__name__}: {str(exc)[:200]}", flush=True)
 
     async with httpx.AsyncClient() as client:
         await asyncio.gather(*(load_site(client, s.id, s.lat, s.lon) for s in sites))
     await engine.dispose()
 
-    print(f"Done: {len(sites) - failures} loaded, {failures} failed.")
+    print(f"Done: {len(sites) - failures} loaded, {failures} failed.", flush=True)
     return failures
 
 
