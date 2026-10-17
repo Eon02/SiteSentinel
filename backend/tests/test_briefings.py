@@ -166,7 +166,11 @@ def test_build_briefing_combines_sources() -> None:
     json.dumps(payload)  # must be JSON-serializable for the webhook and the jsonb column
 
 
-def test_build_briefing_reports_failed_source() -> None:
+def test_build_briefing_reports_failed_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_sleep(_: float) -> None:
+        pass
+
+    monkeypatch.setattr("app.services.open_meteo.asyncio.sleep", no_sleep)
     routes = {**NWS_ROUTES, "https://meteo.test/": httpx.Response(500, json={"reason": "down"})}
 
     async def go():

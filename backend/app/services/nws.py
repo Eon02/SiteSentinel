@@ -81,7 +81,7 @@ async def _get(
         response = await client.get(url, headers=headers, params=params, timeout=30.0)
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:
-        raise NwsError(f"Could not reach NWS: {exc}") from exc
+        raise NwsError(f"Could not reach NWS: {exc!r}") from exc
     if response.is_error:
         raise NwsError(f"NWS returned HTTP {response.status_code}: {data.get('detail', '')}")
     return data

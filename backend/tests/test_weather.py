@@ -6,6 +6,15 @@ from app.http import get_http_client
 from app.main import app
 from app.services.open_meteo import heat_index_f
 
+
+@pytest.fixture
+def no_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def no_sleep(_: float) -> None:
+        pass
+
+    monkeypatch.setattr("app.services.open_meteo.asyncio.sleep", no_sleep)
+
+
 # Trimmed Open-Meteo response; hourly arrays carry 25 values (24 past hours + current hour).
 SAMPLE = {
     "latitude": 25.88878,
@@ -100,3 +109,44 @@ def test_weather_rejects_out_of_range_coordinates() -> None:
 )
 def test_heat_index_matches_nws_chart(temp_f: float, humidity: float, expected: float) -> None:
     assert heat_index_f(temp_f, humidity) == pytest.approx(expected, abs=1.5)
+
+
+def test_weather_retries_timeouts(no_backoff: None) -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        if len(calls) < 3:
+            raise httpx.ReadTimeout("slow", request=request)
+        return httpx.Response(200, json=SAMPLE)
+
+    app.dependency_overrides[get_http_client] = lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+    response = TestClient(app).get("/weather", params={"lat": 25.9, "lon": -80.9})
+
+    assert response.status_code == 200
+    assert len(calls) == 3
+
+
+def test_weather_gives_up_after_retries(no_backoff: None) -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request)
+        raise httpx.ReadTimeout("", request=request)
+
+    app.dependency_overrides[get_http_client] = lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+    response = TestClient(app).get("/weather", params={"lat": 25.9, "lon": -80.9})
+
+    assert response.status_code == 502
+    assert len(calls) == 3
+    assert "ReadTimeout" in response.json()["detail"]  # never a blank error message
+
+
+def test_weather_rejected_request_is_not_retried() -> None:
+    client = client_returning(400, {"error": True, "reason": "Bad"})
+    client.get("/weather", params={"lat": 25.9, "lon": -80.9})
+    assert len(client.requests) == 1  # type: ignore[attr-defined]

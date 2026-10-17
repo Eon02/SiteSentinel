@@ -4,10 +4,14 @@ No API key is needed for non-commercial use. All values are returned in US units
 (°F, mph, inches) and dates are local to the coordinate's timezone.
 """
 
+import asyncio
 from datetime import date, datetime, timedelta, timezone
 
 import httpx
 from pydantic import BaseModel
+
+TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+RETRIES = 3
 
 CURRENT_FIELDS = [
     "temperature_2m",
@@ -112,15 +116,27 @@ async def fetch_weather(
         "precipitation_unit": "inch",
         "timezone": "auto",
     }
-    try:
-        response = await client.get(base_url, params=params)
-        data = response.json()
-    except (httpx.HTTPError, ValueError) as exc:
-        raise OpenMeteoError(f"Could not reach Open-Meteo: {exc}") from exc
-    if response.is_error or data.get("error"):
-        reason = data.get("reason", f"HTTP {response.status_code}")
-        raise OpenMeteoError(f"Open-Meteo rejected the request: {reason}")
-    return _parse(data)
+    # Open-Meteo is usually fast but occasionally stalls for 5-30 s, so retry slow or failed
+    # requests. Requests it rejects (bad coordinates, 4xx) fail straight away.
+    last_error: Exception | None = None
+    for attempt in range(RETRIES):
+        try:
+            response = await client.get(base_url, params=params, timeout=TIMEOUT)
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            last_error = exc
+        else:
+            if response.status_code < 500 and response.status_code != 429:
+                if response.is_error or data.get("error"):
+                    reason = data.get("reason", f"HTTP {response.status_code}")
+                    raise OpenMeteoError(f"Open-Meteo rejected the request: {reason}")
+                return _parse(data)
+            last_error = OpenMeteoError(f"HTTP {response.status_code}")
+        if attempt < RETRIES - 1:
+            await asyncio.sleep(2**attempt)
+    raise OpenMeteoError(
+        f"Could not reach Open-Meteo after {RETRIES} attempts: {last_error!r}"
+    ) from last_error
 
 
 def _parse(data: dict) -> WeatherReport:
