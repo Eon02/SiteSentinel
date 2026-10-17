@@ -115,3 +115,21 @@ class FloodZoneLoad(Base):
     radius_mi: Mapped[float] = mapped_column(REAL)
     zone_count: Mapped[int] = mapped_column(Integer)
     loaded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Briefing(Base):
+    """Next-day safety briefing sent (or attempted) for a site."""
+
+    __tablename__ = "briefings"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
+    briefing_date: Mapped[date] = mapped_column(Date)
+    trigger: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(Integer, server_default="1")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

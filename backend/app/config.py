@@ -13,6 +13,16 @@ class Settings(BaseSettings):
     database_url: str
     open_meteo_url: str = "https://api.open-meteo.com/v1/forecast"
     fema_nfhl_url: str = "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer"
+    nws_url: str = "https://api.weather.gov"
+    nws_user_agent: str = "SiteSentinel (github.com/Willsbam/SiteSentinel)"
+
+    # Next-day briefings. Off by default so dev machines don't claim and send the team's
+    # briefings; turn on in exactly one deployed instance.
+    briefings_enabled: bool = False
+    briefing_webhook_url: str | None = None  # where briefings are POSTed as JSON
+    briefing_webhook_token: str | None = None  # sent as "Authorization: Bearer <token>"
+    briefing_hour: int = 18  # site-local hour when the scheduled briefing goes out
+    briefing_check_interval_s: int = 300
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:3000",
         "http://localhost:5173",
