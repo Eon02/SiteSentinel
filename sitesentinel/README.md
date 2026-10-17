@@ -1,4 +1,4 @@
-# SiteSentinel frontend (PlanIT Control)
+# SiteSentinel frontend
 
 Next.js 16 app built from [`SiteSentinelSpec.md`](./SiteSentinelSpec.md): a supervisor dashboard (map + ranked sites),
 site detail pages, a phone-first crew hazard report form, and a `/demo` control panel.

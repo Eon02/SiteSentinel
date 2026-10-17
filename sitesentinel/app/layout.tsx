@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PlanIT Control · SiteSentinel",
+  title: "SiteSentinel",
   description: "Job site hazard ranking, live safety alerts, and crew hazard reports.",
 };
 
@@ -36,7 +36,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <header className="z-20 shrink-0 bg-[#16213E] text-white shadow">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2">
               <Link href="/" className="flex min-h-11 items-center text-xl font-extrabold tracking-tight">
-                PlanIT <span className="ml-1 text-[#E8590C]">Control</span>
+                Site<span className="text-[#E8590C]">Sentinel</span>
               </Link>
               <nav aria-label="Main" className="flex items-center gap-2">
                 <Link href="/" className="flex min-h-11 items-center rounded-lg px-3 font-semibold hover:bg-white/10">
