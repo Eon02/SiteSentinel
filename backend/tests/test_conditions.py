@@ -33,6 +33,8 @@ def test_condition_row_maps_current_weather() -> None:
     assert row["precip_24h_in"] == 2.4
     assert row["soil_moisture"] == 0.9  # 0.45 m³/m³ volumetric -> 90% saturated
     assert row["wind_mph"] == 8.0
+    assert row["wind_gust_mph"] == 22.0
+    assert row["humidity_pct"] == 60
 
 
 def test_record_conditions_stores_good_sites_and_reports_failures(

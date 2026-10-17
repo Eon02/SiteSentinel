@@ -35,17 +35,21 @@ SITES_QUERY = "SELECT id, ST_Y(geom) AS lat, ST_X(geom) AS lon FROM sites"
 UPSERT_CONDITION = text(
     """
     INSERT INTO conditions (
-      site_id, observed_at, temp_f, heat_index_f, precip_24h_in, soil_moisture, wind_mph
+      site_id, observed_at, temp_f, heat_index_f, precip_24h_in, soil_moisture, wind_mph,
+      wind_gust_mph, humidity_pct
     )
     VALUES (
-      :site_id, :observed_at, :temp_f, :heat_index_f, :precip_24h_in, :soil_moisture, :wind_mph
+      :site_id, :observed_at, :temp_f, :heat_index_f, :precip_24h_in, :soil_moisture, :wind_mph,
+      :wind_gust_mph, :humidity_pct
     )
     ON CONFLICT (site_id, observed_at) DO UPDATE SET
       temp_f = EXCLUDED.temp_f,
       heat_index_f = EXCLUDED.heat_index_f,
       precip_24h_in = EXCLUDED.precip_24h_in,
       soil_moisture = EXCLUDED.soil_moisture,
-      wind_mph = EXCLUDED.wind_mph
+      wind_mph = EXCLUDED.wind_mph,
+      wind_gust_mph = EXCLUDED.wind_gust_mph,
+      humidity_pct = EXCLUDED.humidity_pct
     """
 )
 
@@ -80,6 +84,8 @@ def condition_row(site_id: str, report: WeatherReport) -> dict[str, Any]:
         "precip_24h_in": current.precip_24h_in,
         "soil_moisture": soil_saturation(current.soil_moisture),
         "wind_mph": current.wind_mph,
+        "wind_gust_mph": current.wind_gust_mph,
+        "humidity_pct": current.humidity_pct,
     }
 
 
