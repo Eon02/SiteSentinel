@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "siteId": "60001",
+    "hazardType": "wildlife",
+    "description": "Alligator, about 8 ft, sunning on the access road by inverter row C. Crew holding at the gate.",
+    "reportedBy": "M. Alvarez",
+    "lat": 25.7631,
+    "lon": -80.6289,
+    "createdAt": "2026-10-17T13:22:00Z"
+  },
+  {
+    "id": 2,
+    "siteId": "2050",
+    "hazardType": "standing_water",
+    "description": "Six inches of water across the east laydown yard.",
+    "reportedBy": "J. Carter",
+    "lat": 32.2819,
+    "lon": -90.9287,
+    "createdAt": "2026-10-17T11:05:00Z"
+  }
+]

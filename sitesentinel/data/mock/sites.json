@@ -1,0 +1,321 @@
+[
+  {
+    "id": "60001",
+    "name": "Everglades Solar Energy Center",
+    "utility": "Florida Power & Light Co",
+    "plantType": "Solar",
+    "county": "Miami-Dade",
+    "state": "FL",
+    "timezone": "America/New_York",
+    "nearRiver": false,
+    "lat": 25.7617,
+    "lon": -80.6312,
+    "score": 8.7,
+    "forecastScore": 9.1,
+    "topFactors": [
+      { "factor": "heat", "weight": 0.42 },
+      { "factor": "soil_saturation", "weight": 0.31 },
+      { "factor": "lightning", "weight": 0.18 },
+      { "factor": "wildlife", "weight": 0.09 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 94,
+      "heatIndexF": 108,
+      "precip24hIn": 1.8,
+      "soilMoisture": 0.86,
+      "windMph": 9
+    }
+  },
+  {
+    "id": "2050",
+    "name": "Baxter Wilson",
+    "utility": "Entergy Mississippi LLC",
+    "plantType": "Natural Gas",
+    "county": "Warren",
+    "state": "MS",
+    "timezone": "America/Chicago",
+    "nearRiver": true,
+    "lat": 32.2833,
+    "lon": -90.9306,
+    "score": 7.6,
+    "forecastScore": 8.2,
+    "topFactors": [
+      { "factor": "flood", "weight": 0.48 },
+      { "factor": "soil_saturation", "weight": 0.32 },
+      { "factor": "precipitation", "weight": 0.2 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 78,
+      "heatIndexF": 80,
+      "precip24hIn": 3.1,
+      "soilMoisture": 0.92,
+      "windMph": 14
+    }
+  },
+  {
+    "id": "1403",
+    "name": "Ninemile Point",
+    "utility": "Entergy Louisiana LLC",
+    "plantType": "Natural Gas",
+    "county": "Jefferson",
+    "state": "LA",
+    "timezone": "America/Chicago",
+    "nearRiver": true,
+    "lat": 29.9472,
+    "lon": -90.1453,
+    "score": 6.9,
+    "forecastScore": 6.4,
+    "topFactors": [
+      { "factor": "heat", "weight": 0.38 },
+      { "factor": "flood", "weight": 0.34 },
+      { "factor": "storm", "weight": 0.28 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 89,
+      "heatIndexF": 99,
+      "precip24hIn": 0.9,
+      "soilMoisture": 0.71,
+      "windMph": 17
+    }
+  },
+  {
+    "id": "57275",
+    "name": "Alta Wind Energy Center",
+    "utility": "Terra-Gen LLC",
+    "plantType": "Wind",
+    "county": "Kern",
+    "state": "CA",
+    "timezone": "America/Los_Angeles",
+    "nearRiver": false,
+    "lat": 35.0313,
+    "lon": -118.3209,
+    "score": 6.3,
+    "forecastScore": 7.1,
+    "topFactors": [
+      { "factor": "wildfire", "weight": 0.51 },
+      { "factor": "wind", "weight": 0.37 },
+      { "factor": "heat", "weight": 0.12 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 86,
+      "heatIndexF": 84,
+      "precip24hIn": 0,
+      "soilMoisture": 0.08,
+      "windMph": 31
+    }
+  },
+  {
+    "id": "58912",
+    "name": "Roadrunner Solar",
+    "utility": "Enel Green Power NA",
+    "plantType": "Solar",
+    "county": "Upton",
+    "state": "TX",
+    "timezone": "America/Chicago",
+    "nearRiver": false,
+    "lat": 31.2224,
+    "lon": -102.2715,
+    "score": 5.4,
+    "forecastScore": 6.1,
+    "topFactors": [
+      { "factor": "heat", "weight": 0.66 },
+      { "factor": "wind", "weight": 0.2 },
+      { "factor": "lightning", "weight": 0.14 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 97,
+      "heatIndexF": 96,
+      "precip24hIn": 0,
+      "soilMoisture": 0.12,
+      "windMph": 18
+    }
+  },
+  {
+    "id": "57373",
+    "name": "Agua Caliente Solar Project",
+    "utility": "Agua Caliente Solar LLC",
+    "plantType": "Solar",
+    "county": "Yuma",
+    "state": "AZ",
+    "timezone": "America/Phoenix",
+    "nearRiver": false,
+    "lat": 32.9713,
+    "lon": -113.4947,
+    "score": 4.7,
+    "forecastScore": 4.2,
+    "topFactors": [
+      { "factor": "heat", "weight": 0.78 },
+      { "factor": "wind", "weight": 0.22 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 99,
+      "heatIndexF": 95,
+      "precip24hIn": 0,
+      "soilMoisture": 0.05,
+      "windMph": 11
+    }
+  },
+  {
+    "id": "56982",
+    "name": "Buckeye Wind Energy",
+    "utility": "NextEra Energy Resources",
+    "plantType": "Wind",
+    "county": "Woodward",
+    "state": "OK",
+    "timezone": "America/Chicago",
+    "nearRiver": false,
+    "lat": 36.4334,
+    "lon": -99.3904,
+    "score": 4.1,
+    "forecastScore": 5.6,
+    "topFactors": [
+      { "factor": "storm", "weight": 0.47 },
+      { "factor": "wind", "weight": 0.36 },
+      { "factor": "lightning", "weight": 0.17 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 74,
+      "heatIndexF": 74,
+      "precip24hIn": 0.3,
+      "soilMoisture": 0.34,
+      "windMph": 26
+    }
+  },
+  {
+    "id": "649",
+    "name": "Vogtle",
+    "utility": "Georgia Power Co",
+    "plantType": "Nuclear",
+    "county": "Burke",
+    "state": "GA",
+    "timezone": "America/New_York",
+    "nearRiver": false,
+    "lat": 33.1427,
+    "lon": -81.7625,
+    "score": 3.6,
+    "forecastScore": 3.2,
+    "topFactors": [
+      { "factor": "heat", "weight": 0.55 },
+      { "factor": "lightning", "weight": 0.45 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 84,
+      "heatIndexF": 88,
+      "precip24hIn": 0.2,
+      "soilMoisture": 0.41,
+      "windMph": 7
+    }
+  },
+  {
+    "id": "2500",
+    "name": "Ravenswood",
+    "utility": "Ravenswood Operations LLC",
+    "plantType": "Natural Gas",
+    "county": "Queens",
+    "state": "NY",
+    "timezone": "America/New_York",
+    "nearRiver": false,
+    "lat": 40.7597,
+    "lon": -73.9456,
+    "score": 3.1,
+    "forecastScore": 2.6,
+    "topFactors": [
+      { "factor": "wind", "weight": 0.58 },
+      { "factor": "precipitation", "weight": 0.42 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 62,
+      "heatIndexF": 62,
+      "precip24hIn": 0.5,
+      "soilMoisture": 0.48,
+      "windMph": 21
+    }
+  },
+  {
+    "id": "470",
+    "name": "Comanche",
+    "utility": "Public Service Co of Colorado",
+    "plantType": "Coal",
+    "county": "Pueblo",
+    "state": "CO",
+    "timezone": "America/Denver",
+    "nearRiver": false,
+    "lat": 38.2081,
+    "lon": -104.5747,
+    "score": 2.2,
+    "forecastScore": 2.8,
+    "topFactors": [
+      { "factor": "wind", "weight": 0.61 },
+      { "factor": "wildfire", "weight": 0.39 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 58,
+      "heatIndexF": 58,
+      "precip24hIn": 0,
+      "soilMoisture": 0.19,
+      "windMph": 15
+    }
+  },
+  {
+    "id": "6090",
+    "name": "Sherburne County",
+    "utility": "Northern States Power Co - Minnesota",
+    "plantType": "Coal",
+    "county": "Sherburne",
+    "state": "MN",
+    "timezone": "America/Chicago",
+    "nearRiver": false,
+    "lat": 45.3792,
+    "lon": -93.8958,
+    "score": 1.7,
+    "forecastScore": 1.4,
+    "topFactors": [
+      { "factor": "wind", "weight": 0.7 },
+      { "factor": "precipitation", "weight": 0.3 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 49,
+      "heatIndexF": 49,
+      "precip24hIn": 0.1,
+      "soilMoisture": 0.37,
+      "windMph": 12
+    }
+  },
+  {
+    "id": "3921",
+    "name": "Chief Joseph Dam",
+    "utility": "USACE Northwestern Division",
+    "plantType": "Hydroelectric",
+    "county": "Douglas",
+    "state": "WA",
+    "timezone": "America/Los_Angeles",
+    "nearRiver": false,
+    "lat": 47.9953,
+    "lon": -119.6328,
+    "score": 1.1,
+    "forecastScore": 1.3,
+    "topFactors": [
+      { "factor": "wind", "weight": 0.8 },
+      { "factor": "precipitation", "weight": 0.2 }
+    ],
+    "conditions": {
+      "observedAt": "2026-10-17T15:00:00Z",
+      "tempF": 54,
+      "heatIndexF": 54,
+      "precip24hIn": 0,
+      "soilMoisture": 0.22,
+      "windMph": 8
+    }
+  }
+]
