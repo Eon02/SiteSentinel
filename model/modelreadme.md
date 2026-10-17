@@ -282,6 +282,71 @@ outdoor flood below 1 (0.80–0.87). Outdoor lightning is below 1 only at 25 km 
 - Stricter definition for point events (same day, ≤10 km, with damage reported) to see whether
   a real signal is hiding in the noise.
 
+## Productivity weighting and site-closure rules
+
+Two follow-on components, built from the plans in `plans/` (which hold the full design and the
+decisions behind it). They don't use the injury results as inputs; the injury analysis is only
+the motivation. Both target **outdoor construction work** at plants under construction.
+
+| Component | Files | What it does |
+|---|---|---|
+| Productivity weighting | `productivity/` (`estimate.py`, `heat_metrics.py`, `curves.yaml`, `defaults.yaml`, `SOURCES.md`, `PROPOSALS.md`) | Hourly productivity loss from heat and cold/ice for today and tomorrow, as low/central/high `slowdown` `LossEvent`s, plus lost worker-hours and a labor-cost equivalent (`summarize`) and `top_factors` entries (`hazard_factors`) |
+| Site-closure rules | `closure/` (`evaluate.py`, `rules.yaml`, `SOURCES.md`, `PROPOSALS.md`) | 15 cited stop-work rules → a site-level `none` / `warning` / `stop_work` decision, `alerts` records, and `stoppage` `LossEvent`s |
+| Tests | `tests/test_productivity.py`, `tests/test_closure.py` | `uv run pytest -q` (48 pass, 1 skipped: it imports the backend weather model, which needs `pydantic`) |
+
+Inputs use the backend's field names (`humidity_pct`, `wind_gust_mph`, `weather_code`, ...; see
+the table in either plan). Crew and labor inputs (`num_crews`, `crew_size`, `hours_worked` per
+day, `work_start_hour` default 7, `labor_rate`) don't exist in the backend yet; null values fall
+back to documented defaults and each result records which ones it used.
+
+### Decisions
+
+- `stop_work` means the **whole site**. Rules that restrict one kind of work (cranes, lifts,
+  scaffolds, excavations) are site-level `warning`s that name the work.
+- Flooding is never escalated; it stays a `warning` (the backend already raises flood alerts).
+- `weather_code` is the only precipitation-type source. No hourly forecast is requested, so
+  tomorrow's numbers come from daily values and are upper bounds.
+- Wind thresholds: **no regulation or standard found sets a site-wide wind limit**; numbers exist
+  only per activity. A site stops for wind only through an NWS tornado or severe-thunderstorm
+  warning, which is labelled company policy.
+
+### What is verified and what isn't
+
+- **Heat curve:** published (Foster et al. 2022, Int J Biometeorol 66:175, heat-index equation
+  with its solar correction), applied to `heat_index_f`. The "high clothing coverage" curve is
+  used, which gives somewhat higher losses than lighter work clothing. Implied loss for heavy
+  outdoor work: about 4% at 85 °F, 12% at 95 °F, 20% at 105 °F, 27% at 115 °F. A discrepancy in
+  Foster et al. 2021 (its abstract says 10% loss at WBGT 18 °C; its equations give about 2%) is
+  unresolved and noted in `productivity/SOURCES.md`.
+- **Illustrative, pending calibration:** all cold and ice/snow numbers (the Koehn & Brown source
+  was not reachable), the sun scaling across scenarios, the WBGT sun adjustment, onset
+  thresholds, and tomorrow's widening.
+- **Labor rate:** BLS ECEC, Construction, June 2026: $51.96 total compensation, $36.13 wages
+  (load factor 1.438). The unit ("per hour worked") is assumed, not read.
+- **Closure rules:** verified from primary text: OSHA 1926.451(f)(12), 1926.1431(k)(8)(i)
+  (personnel hoisting above 20 mph), 1926.1417(n), 1926.651; NWS 30-minute lightning wait. The
+  10-mile lightning radius comes from USACE EM 385-1-1 read through a reproduction, **not from
+  NWS**. The ANSI A92 "28 mph" aerial-lift limit is unconfirmed and ships as company policy, as do
+  the NWS tornado / severe-thunderstorm / high-wind stops and the hail stop. Heat has no
+  mandatory-stop rule (California §3395 has triggers only; the federal rule is still a
+  proposal), so heat stays in the productivity component.
+- `thunderstorm_now` (weather codes 95, 96, 99) stops the site as a stand-in for lightning until
+  a real lightning feed exists, so any forecast thunderstorm closes the site.
+
+### Using the two together
+
+Both emit `LossEvent`s with the same core fields (`site_id`, `start`, `end`, `kind`,
+`fraction_lost`, `scenario`, `factor`, `rule_or_curve_id`, `source`, `activity`). Each adds its
+own optional metadata (`assumptions` in productivity, `defaults_used` in closure) and each package
+defines its own class; unify them when the cost model is built. A later cost model must not
+double count: hours when the site is stopped shouldn't also be charged as a slowdown. Lost
+profit (work made up later, overtime, schedule delay, equipment and overhead) is not modelled;
+these are labor-cost equivalents only.
+
+Proposed backend and frontend changes (a `conditions` migration for the new columns, crew and
+labor columns, a `cost_estimates` table, new alert types, a lightning feed, persisting
+hysteresis state) are in each package's `PROPOSALS.md`. None are implemented.
+
 ## Caveats
 
 - OSHA covers only *severe* injuries, and reporting differs between federal and state-plan

@@ -1,0 +1,117 @@
+# Productivity loss curves. Each entry names its source (see SOURCES.md) and its status.
+# status "published" = coefficients copied from the cited paper's equations.
+# status "illustrative, pending calibration" = numbers are our assumption, not from a source.
+version: 1
+
+heat:
+  # Foster et al. 2021 (Int J Biometeorol 65:1215-1229) Table 3, with the Foster et al. 2022
+  # (66:175-188) solar correction. Physical work capacity (PWC, %) is
+  #   PWC = 100 / (1 + (a / metric) ** b)  [- sun_scale * amplitude * exp(-0.5 * ((metric - mu) / sigma) ** 2)]
+  # with the metric in degrees C. Loss fraction = 1 - PWC / 100. The curve is zero at and below
+  # `onset_c` and baseline-adjusted (the loss at onset is subtracted) so it is continuous.
+  curves:
+    foster_hi_coverall:
+      metric: heat_index_c
+      status: published (equation); onset and scenario sun scaling are assumptions
+      source: >-
+        Foster et al. 2022, Int J Biometeorol 66:175-188, Table 2 (high clothing coverage,
+        0.86 clo, Heat Index row)
+      a: 55.79
+      b: -2.68
+      solar_correction: {amplitude: 11.34, mu: 44.02, sigma: 18.05}
+      valid_range_c: [14, 55]
+      onset_c: 26.7   # 80 F: NWS heat index is only defined from about here upward
+    foster_wbgt_coverall:
+      metric: wbgt_c
+      status: published (equation); onset and sun adjustment are assumptions
+      source: >-
+        Foster et al. 2022, Int J Biometeorol 66:175-188, Table 2 (high clothing coverage,
+        0.86 clo, WBGT row; WBGT already includes solar load, so no correction term)
+      a: 33.76
+      b: -5.87
+      solar_correction: null
+      valid_range_c: [12, 36]
+      onset_c: 21.0   # illustrative: roughly the WBGT of an 80 F heat-index day
+  scenarios:
+    # Current observation, heat index metric (default). Scenarios differ only in how much of the
+    # published full-sun penalty (800 W/m2) applies. sun_scale is an ILLUSTRATIVE assumption for the
+    # work-window average (clouds, sun angle): 0 = shade (published pooled-condition equation),
+    # 1 = full 800 W/m2 for the whole window.
+    today_heat_index:
+      curve: foster_hi_coverall
+      low: {sun_scale: 0.0, metric_offset_c: 0.0}
+      central: {sun_scale: 0.5, metric_offset_c: 0.0}
+      high: {sun_scale: 1.0, metric_offset_c: 0.0}
+      confidence: medium
+    # Current observation, WBGT estimated from temperature and humidity (shade formula + sun
+    # adjustment). The adjustment values are ILLUSTRATIVE (see SOURCES.md).
+    today_wbgt:
+      curve: foster_wbgt_coverall
+      low: {sun_adjustment_c: 0.0}
+      central: {sun_adjustment_c: 3.0}
+      high: {sun_adjustment_c: 5.0}
+      confidence: low
+    # Tomorrow, Open-Meteo feels_like_max_f (apparent temperature) treated like a heat index on the
+    # SHADE curve (apparent temperature already includes sun). Approximation, worst hour of the
+    # day, so an upper bound. The +/- metric offset is an ILLUSTRATIVE widening.
+    tomorrow_feels_like:
+      curve: foster_hi_coverall
+      low: {sun_scale: 0.0, metric_offset_c: -3.0}
+      central: {sun_scale: 0.0, metric_offset_c: 0.0}
+      high: {sun_scale: 0.0, metric_offset_c: 3.0}
+      confidence: low
+
+cold:
+  # ILLUSTRATIVE, PENDING CALIBRATION. No cold-weather productivity numbers could be verified
+  # (Koehn & Brown 1985 was only reachable through secondary sources). The shape follows the
+  # qualitative reports quoted in SOURCES.md; the values are our assumption.
+  # Piecewise linear: [wind_chill_f, fraction_lost], ascending in wind chill, clamped at the ends.
+  wind_chill:
+    id: cold_wind_chill_illustrative
+    status: illustrative, pending calibration
+    source: assumption; shape informed by Koehn & Brown 1985 (secondary reports, unverified)
+    zero_at_or_above_f: 40
+    low:
+      - [-20, 0.45]
+      - [0, 0.30]
+      - [10, 0.18]
+      - [20, 0.08]
+      - [32, 0.02]
+      - [40, 0.0]
+    central:
+      - [-20, 0.75]
+      - [0, 0.50]
+      - [10, 0.30]
+      - [20, 0.15]
+      - [32, 0.05]
+      - [40, 0.0]
+    high:
+      - [-20, 0.90]
+      - [0, 0.70]
+      - [10, 0.45]
+      - [20, 0.25]
+      - [32, 0.10]
+      - [40, 0.0]
+
+ice_snow:
+  # ILLUSTRATIVE, PENDING CALIBRATION. Keyed on the WMO weather_code (no separate precip type).
+  # Full stop-work icing belongs to the closure branch; these are slowdowns only.
+  status: illustrative, pending calibration
+  source: assumption
+  rules:
+    - id: freezing_precip      # freezing drizzle 56-57, freezing rain 66-67
+      codes: [56, 57, 66, 67]
+      max_temp_f: null
+      loss: {low: 0.25, central: 0.40, high: 0.60}
+    - id: snow_light           # slight snow 71, snow grains 77, slight snow showers 85
+      codes: [71, 77, 85]
+      max_temp_f: 36
+      loss: {low: 0.05, central: 0.10, high: 0.20}
+    - id: snow_moderate_heavy  # moderate 73, heavy 75, heavy snow showers 86
+      codes: [73, 75, 86]
+      max_temp_f: 36
+      loss: {low: 0.10, central: 0.25, high: 0.40}
+  accumulation:
+    precip_24h_in_min: 0.25    # liquid-equivalent inches in the last 24 h
+    multiplier: 1.25
+  cap: 0.9

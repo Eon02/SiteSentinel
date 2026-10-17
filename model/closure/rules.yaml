@@ -1,0 +1,234 @@
+# Site-closure rules. Thresholds come from regulations/standards/agency guidance or are labelled
+# company policy; they are NOT derived from our injury data (see modelreadme.md: no detectable
+# injury link for wind, hail or lightning). Details and verification status: SOURCES.md.
+#
+# kind:  lightning | numeric | weather_code | nws_event | flood
+# scope: "site" (whole site; only these may be stop_work) or the named work that is restricted.
+# op:    gt "exceeds", ge "at or above", lt "below", le "within / at or below"
+#        (matches the wording of the source).
+# hold_minutes: hysteresis. The rule stays active this long after it last triggered.
+# verified: yes | partial | no  (see SOURCES.md)
+
+settings:
+  lightning_radius_mi: 10      # EM 385-1-1 16.I.03 (secondary copy); NWS gives no distance
+  lightning_hold_minutes: 30   # NWS / OSHA-NOAA FS-3863: wait 30 min after last thunder/lightning
+  default_work_start_hour: 7   # shared contract
+  default_hours_worked: 8      # fallback only; reported in SiteDecision.defaults_used
+  # Illustrative, pending calibration: share of the workday lost when TOMORROW's daily forecast
+  # shows a stop-work condition (daily data cannot say when).
+  forecast_day_fraction: {low: 0.25, central: 0.5, high: 1.0}
+
+rules:
+  - id: lightning_within_range
+    hazard: lightning
+    kind: lightning
+    metric: lightning strike distance_mi
+    threshold: 10
+    op: le
+    scope: site
+    severity: stop_work
+    hold_minutes: 30
+    resume_condition: 30 minutes after the last strike within range
+    source_type: agency guidance
+    citation: "USACE EM 385-1-1, Sec. 16.I.03 (10 mi, 30 min); NWS lightning safety (30 min)"
+    jurisdiction: US (EM 385-1-1 binds USACE contracts only)
+    verified: partial   # distance from a secondary copy of EM 385-1-1; edition unknown
+
+  - id: thunderstorm_now
+    hazard: lightning
+    kind: weather_code
+    metric: weather_code
+    codes: [95, 96, 99]
+    scope: site
+    severity: stop_work
+    hold_minutes: 30
+    resume_condition: 30 minutes after a thunderstorm weather code was last observed
+    source_type: agency guidance
+    citation: "NWS lightning safety: 'When Thunder Roars, Go Indoors!'; wait 30 min after last lightning or thunder"
+    jurisdiction: US
+    verified: partial   # proxy used until a lightning feed exists (see PROPOSALS.md)
+
+  - id: nws_tornado_warning
+    hazard: severe storm
+    kind: nws_event
+    metric: ActiveAlert.event
+    events: ["Tornado Warning"]
+    scope: site
+    severity: stop_work
+    hold_minutes: 0
+    resume_condition: warning expires or is cancelled
+    source_type: company policy
+    citation: "UNVERIFIED as a rule: no OSHA or consensus text found that mandates stopping work"
+    jurisdiction: none
+    verified: no
+
+  - id: nws_severe_thunderstorm_warning
+    hazard: severe storm
+    kind: nws_event
+    metric: ActiveAlert.event
+    events: ["Severe Thunderstorm Warning"]
+    scope: site
+    severity: stop_work
+    hold_minutes: 0
+    resume_condition: warning expires or is cancelled
+    source_type: company policy
+    citation: "UNVERIFIED as a rule. NWS defines the warning as gusts >= 58 mph or hail >= 1 in"
+    jurisdiction: none
+    verified: no
+
+  - id: nws_high_wind_warning
+    hazard: wind
+    kind: nws_event
+    metric: ActiveAlert.event
+    events: ["High Wind Warning", "Extreme Wind Warning"]
+    scope: crane, aerial-lift, scaffold and material-handling work
+    severity: warning
+    hold_minutes: 0
+    resume_condition: warning expires or is cancelled
+    source_type: company policy
+    citation: "UNVERIFIED. NWS High Wind Warning numeric criteria were not confirmed"
+    jurisdiction: none
+    verified: no
+
+  - id: crane_wind_20mph
+    hazard: wind
+    kind: numeric
+    metric: wind_gust_mph
+    threshold: 20
+    op: gt
+    scope: crane operations
+    severity: warning
+    hold_minutes: 30   # illustrative hysteresis, not from the source
+    resume_condition: gusts at or below 20 mph for 30 minutes, or lift supervisor re-evaluates per manufacturer wind calculations
+    source_type: agency guidance
+    citation: "USACE EM 385-1-1, Sec. 16.I.01: above 20 mph the operator, rigger and lift supervisor must cease and evaluate. OSHA 1926 Subpart CC sets no number (1926.1417(n): competent person adjusts for wind, ice, snow)"
+    jurisdiction: US (USACE contracts)
+    verified: partial   # via a secondary copy of EM 385-1-1; edition unknown. Gusts used (conservative)
+
+  - id: personnel_hoist_wind_20mph
+    hazard: wind
+    kind: numeric
+    metric: wind_gust_mph
+    threshold: 20
+    op: gt
+    scope: crane personnel-platform hoisting
+    severity: warning
+    hold_minutes: 30   # illustrative hysteresis, not from the source
+    resume_condition: qualified person determines the lift is safe at the platform
+    source_type: regulation
+    citation: "29 CFR 1926.1431(k)(8)(i): wind (sustained or gusts) above 20 mph at the personnel platform; qualified person must determine safety, else the lift must not begin or must be terminated"
+    jurisdiction: US federal OSHA (construction)
+    verified: yes   # OSHA text. Wind is measured at the platform; our 10 m reading is a proxy
+
+  - id: aerial_lift_wind_28mph
+    hazard: wind
+    kind: numeric
+    metric: wind_gust_mph
+    threshold: 28
+    op: gt
+    scope: aerial work platform (lift) operations
+    severity: warning
+    hold_minutes: 30   # illustrative hysteresis
+    resume_condition: gusts at or below 28 mph for 30 minutes, or per the machine's manual
+    source_type: company policy
+    citation: "UNVERIFIED. ANSI A92.20 wind rating (12.5 m/s) could not be confirmed (standard is paywalled); 12.5 m/s appears in European EN 280. The real limit is the manufacturer's rating on each machine's data plate"
+    jurisdiction: none
+    verified: no
+
+  - id: scaffold_nws_severe_wind
+    hazard: wind
+    kind: nws_event
+    metric: ActiveAlert.event
+    events: ["High Wind Warning", "Extreme Wind Warning", "Severe Thunderstorm Warning", "Tornado Warning"]
+    scope: work on or from scaffolds
+    severity: warning
+    hold_minutes: 0
+    resume_condition: competent person determines it is safe and workers use fall arrest or wind screens
+    source_type: regulation
+    citation: "29 CFR 1926.451(f)(12): work on or from scaffolds is prohibited during storms or high winds unless a competent person determines it is safe and employees have fall arrest or wind screens (no numeric wind limit)"
+    jurisdiction: US federal OSHA (construction)
+    verified: yes   # regulation text verified; which events count as 'storms or high winds' is our mapping
+
+  - id: scaffold_storm_code
+    hazard: severe storm
+    kind: weather_code
+    metric: weather_code
+    codes: [95, 96, 99]
+    scope: work on or from scaffolds
+    severity: warning
+    hold_minutes: 0
+    resume_condition: competent person determines it is safe
+    source_type: regulation
+    citation: "29 CFR 1926.451(f)(12) (see scaffold_nws_severe_wind)"
+    jurisdiction: US federal OSHA (construction)
+    verified: yes
+
+  - id: scaffold_icing
+    hazard: icing
+    kind: weather_code
+    metric: weather_code
+    codes: [56, 57, 66, 67]
+    scope: work on or from scaffolds, elevated surfaces and crane operations
+    severity: warning
+    hold_minutes: 0
+    resume_condition: freezing precipitation ends and surfaces are cleared of ice
+    source_type: regulation
+    citation: "29 CFR 1926.451(f)(8): no work on scaffolds covered with snow, ice or other slippery material except to remove it; 1926.1417(n): cranes adjust for ice"
+    jurisdiction: US federal OSHA (construction)
+    verified: partial   # (f)(8) located via a summarising fetch, not read verbatim
+
+  - id: hail_thunderstorm_code
+    hazard: hail
+    kind: weather_code
+    metric: weather_code
+    codes: [96, 99]
+    scope: site
+    severity: stop_work
+    hold_minutes: 30
+    resume_condition: 30 minutes after a hail code was last observed
+    source_type: company policy
+    citation: "UNVERIFIED as a rule: no regulation found that mandates stopping for hail. Codes 96/99 (thunderstorm with hail) already trigger thunderstorm_now"
+    jurisdiction: none
+    verified: no
+
+  - id: excavation_water
+    hazard: rain
+    kind: weather_code
+    metric: weather_code
+    codes: [61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99]
+    scope: excavations and trenches (inspect before entry; no work with accumulating water)
+    severity: warning
+    hold_minutes: 0
+    resume_condition: competent person inspects after the rainstorm and water is controlled
+    source_type: regulation
+    citation: "29 CFR 1926.651(h)(1): no work in excavations with accumulated or accumulating water without adequate precautions; 1926.651(k)(1): inspect after every rainstorm"
+    jurisdiction: US federal OSHA (construction)
+    verified: yes   # 'rainstorm' has no numeric definition; rain weather codes are our mapping
+
+  - id: flood_risk
+    hazard: flooding
+    kind: flood
+    metric: backend flood_warnings.assess() result
+    scope: site access, low ground and excavations
+    severity: warning   # never escalated to stop_work (decided)
+    hold_minutes: 0
+    resume_condition: flood assessment no longer at risk (NWS flood product ends, rain and exposure rule clear)
+    source_type: agency guidance
+    citation: "NWS flood warnings, watches and advisories; backend rule: >= 1.0 in rain in 24 h near a river or FEMA flood zone (app/services/flood_warnings.py)"
+    jurisdiction: US
+    verified: partial   # the 1.0 in threshold is the backend's own setting, not a cited rule
+
+  - id: concrete_cold_weather
+    hazard: cold
+    kind: numeric
+    metric: temp_f
+    threshold: 40
+    op: lt
+    scope: concrete placement (material constraint, not a safety stop)
+    severity: warning
+    hold_minutes: 0
+    resume_condition: temperature at or above 40 F, or cold-weather protection in place
+    source_type: consensus standard
+    citation: "ACI 306R cold weather concreting: provisions apply when air temperature is at or expected below 40 F during the protection period (wording from a secondary summary)"
+    jurisdiction: US (referenced by project specs)
+    verified: partial

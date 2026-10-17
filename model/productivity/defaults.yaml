@@ -1,0 +1,20 @@
+# Fallbacks used ONLY when an input is null (tests, demos). Every estimate records which
+# fields fell back (see LossEvent.assumptions["defaulted"]).
+crew:
+  num_crews: 2
+  crew_size: 10
+  hours_worked: 8        # hours per day
+  work_start_hour: 7     # site-local hour the workday starts (0-23)
+  # BLS Employer Costs for Employee Compensation, Construction industry, private industry
+  # workers, June 2026: total compensation $51.96, wages and salaries $36.13, benefits $15.84
+  # (https://www.bls.gov/news.release/ecec.t04.htm). The page did not state the unit; ECEC is
+  # normally dollars per hour worked. Treated as a fully loaded rate.
+  labor_rate: 51.96
+  labor_rate_basis: loaded   # "loaded" (wages + benefits + overhead) or "base" (wage only)
+  # Total compensation / wages and salaries = 51.96 / 36.13. Applied only when the basis is "base".
+  # This covers wages and benefits, not overhead, insurance or supervision.
+  base_wage_load_factor: 1.438
+site:
+  timezone: UTC
+heat:
+  metric: heat_index     # "heat_index" (default) or "wbgt"
