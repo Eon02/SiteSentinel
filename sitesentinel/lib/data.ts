@@ -133,6 +133,7 @@ function rowToConditions(r: Row): Conditions {
     precip24hIn: num(r.precip_24h_in),
     soilMoisture: num(r.soil_moisture),
     windMph: num(r.wind_mph),
+    windGustMph: num(r.wind_gust_mph),
   };
 }
 

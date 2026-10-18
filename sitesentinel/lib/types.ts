@@ -14,6 +14,7 @@ export type Site = {
 export type Conditions = {
   observedAt: string; tempF?: number; heatIndexF?: number;
   precip24hIn?: number; soilMoisture?: number; windMph?: number;
+  windGustMph?: number; // peak gust; the hazard score uses the higher of this and windMph
 };
 
 export type AlertType = 'lightning' | 'flood' | 'heat' | 'wildfire' | 'storm';

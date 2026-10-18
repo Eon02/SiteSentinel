@@ -29,7 +29,8 @@
       "heatIndexF": 108,
       "precip24hIn": 1.8,
       "soilMoisture": 0.86,
-      "windMph": 9
+      "windMph": 9,
+      "windGustMph": 15
     }
   },
   {
@@ -61,7 +62,8 @@
       "heatIndexF": 80,
       "precip24hIn": 3.1,
       "soilMoisture": 0.92,
-      "windMph": 14
+      "windMph": 14,
+      "windGustMph": 24
     }
   },
   {
@@ -93,7 +95,8 @@
       "heatIndexF": 99,
       "precip24hIn": 0.9,
       "soilMoisture": 0.71,
-      "windMph": 17
+      "windMph": 17,
+      "windGustMph": 29
     }
   },
   {
@@ -125,7 +128,8 @@
       "heatIndexF": 84,
       "precip24hIn": 0,
       "soilMoisture": 0.08,
-      "windMph": 31
+      "windMph": 31,
+      "windGustMph": 53
     }
   },
   {
@@ -157,7 +161,8 @@
       "heatIndexF": 96,
       "precip24hIn": 0,
       "soilMoisture": 0.12,
-      "windMph": 18
+      "windMph": 18,
+      "windGustMph": 31
     }
   },
   {
@@ -187,7 +192,8 @@
       "heatIndexF": 95,
       "precip24hIn": 0,
       "soilMoisture": 0.05,
-      "windMph": 11
+      "windMph": 11,
+      "windGustMph": 19
     }
   },
   {
@@ -219,7 +225,8 @@
       "heatIndexF": 74,
       "precip24hIn": 0.3,
       "soilMoisture": 0.34,
-      "windMph": 26
+      "windMph": 26,
+      "windGustMph": 44
     }
   },
   {
@@ -249,7 +256,8 @@
       "heatIndexF": 88,
       "precip24hIn": 0.2,
       "soilMoisture": 0.41,
-      "windMph": 7
+      "windMph": 7,
+      "windGustMph": 12
     }
   },
   {
@@ -279,7 +287,8 @@
       "heatIndexF": 62,
       "precip24hIn": 0.5,
       "soilMoisture": 0.48,
-      "windMph": 21
+      "windMph": 21,
+      "windGustMph": 36
     }
   },
   {
@@ -309,7 +318,8 @@
       "heatIndexF": 58,
       "precip24hIn": 0,
       "soilMoisture": 0.19,
-      "windMph": 15
+      "windMph": 15,
+      "windGustMph": 26
     }
   },
   {
@@ -339,7 +349,8 @@
       "heatIndexF": 49,
       "precip24hIn": 0.1,
       "soilMoisture": 0.37,
-      "windMph": 12
+      "windMph": 12,
+      "windGustMph": 20
     }
   },
   {
@@ -369,7 +380,8 @@
       "heatIndexF": 54,
       "precip24hIn": 0,
       "soilMoisture": 0.22,
-      "windMph": 8
+      "windMph": 8,
+      "windGustMph": 14
     }
   }
 ]
