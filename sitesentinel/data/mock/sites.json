@@ -12,6 +12,11 @@
     "lon": -80.6312,
     "score": 8.7,
     "forecastScore": 9.1,
+    "forecastTopFactors": [
+      { "factor": "heat", "weight": 0.44 },
+      { "factor": "soil_saturation", "weight": 0.32 },
+      { "factor": "lightning", "weight": 0.19 }
+    ],
     "topFactors": [
       { "factor": "heat", "weight": 0.42 },
       { "factor": "soil_saturation", "weight": 0.31 },
@@ -40,6 +45,11 @@
     "lon": -90.9306,
     "score": 7.6,
     "forecastScore": 8.2,
+    "forecastTopFactors": [
+      { "factor": "flood", "weight": 0.52 },
+      { "factor": "soil_saturation", "weight": 0.35 },
+      { "factor": "precipitation", "weight": 0.22 }
+    ],
     "topFactors": [
       { "factor": "flood", "weight": 0.48 },
       { "factor": "soil_saturation", "weight": 0.32 },
@@ -67,6 +77,11 @@
     "lon": -90.1453,
     "score": 6.9,
     "forecastScore": 6.4,
+    "forecastTopFactors": [
+      { "factor": "heat", "weight": 0.35 },
+      { "factor": "flood", "weight": 0.32 },
+      { "factor": "storm", "weight": 0.26 }
+    ],
     "topFactors": [
       { "factor": "heat", "weight": 0.38 },
       { "factor": "flood", "weight": 0.34 },
@@ -94,6 +109,11 @@
     "lon": -118.3209,
     "score": 6.3,
     "forecastScore": 7.1,
+    "forecastTopFactors": [
+      { "factor": "wildfire", "weight": 0.57 },
+      { "factor": "wind", "weight": 0.42 },
+      { "factor": "heat", "weight": 0.14 }
+    ],
     "topFactors": [
       { "factor": "wildfire", "weight": 0.51 },
       { "factor": "wind", "weight": 0.37 },
@@ -121,6 +141,11 @@
     "lon": -102.2715,
     "score": 5.4,
     "forecastScore": 6.1,
+    "forecastTopFactors": [
+      { "factor": "heat", "weight": 0.75 },
+      { "factor": "wind", "weight": 0.23 },
+      { "factor": "lightning", "weight": 0.16 }
+    ],
     "topFactors": [
       { "factor": "heat", "weight": 0.66 },
       { "factor": "wind", "weight": 0.2 },
@@ -148,6 +173,10 @@
     "lon": -113.4947,
     "score": 4.7,
     "forecastScore": 4.2,
+    "forecastTopFactors": [
+      { "factor": "heat", "weight": 0.7 },
+      { "factor": "wind", "weight": 0.2 }
+    ],
     "topFactors": [
       { "factor": "heat", "weight": 0.78 },
       { "factor": "wind", "weight": 0.22 }
@@ -174,6 +203,11 @@
     "lon": -99.3904,
     "score": 4.1,
     "forecastScore": 5.6,
+    "forecastTopFactors": [
+      { "factor": "storm", "weight": 0.64 },
+      { "factor": "wind", "weight": 0.49 },
+      { "factor": "lightning", "weight": 0.23 }
+    ],
     "topFactors": [
       { "factor": "storm", "weight": 0.47 },
       { "factor": "wind", "weight": 0.36 },
@@ -201,6 +235,10 @@
     "lon": -81.7625,
     "score": 3.6,
     "forecastScore": 3.2,
+    "forecastTopFactors": [
+      { "factor": "heat", "weight": 0.49 },
+      { "factor": "lightning", "weight": 0.4 }
+    ],
     "topFactors": [
       { "factor": "heat", "weight": 0.55 },
       { "factor": "lightning", "weight": 0.45 }
@@ -227,6 +265,10 @@
     "lon": -73.9456,
     "score": 3.1,
     "forecastScore": 2.6,
+    "forecastTopFactors": [
+      { "factor": "wind", "weight": 0.49 },
+      { "factor": "precipitation", "weight": 0.35 }
+    ],
     "topFactors": [
       { "factor": "wind", "weight": 0.58 },
       { "factor": "precipitation", "weight": 0.42 }
@@ -253,6 +295,10 @@
     "lon": -104.5747,
     "score": 2.2,
     "forecastScore": 2.8,
+    "forecastTopFactors": [
+      { "factor": "wind", "weight": 0.78 },
+      { "factor": "wildfire", "weight": 0.5 }
+    ],
     "topFactors": [
       { "factor": "wind", "weight": 0.61 },
       { "factor": "wildfire", "weight": 0.39 }
@@ -279,6 +325,10 @@
     "lon": -93.8958,
     "score": 1.7,
     "forecastScore": 1.4,
+    "forecastTopFactors": [
+      { "factor": "wind", "weight": 0.58 },
+      { "factor": "precipitation", "weight": 0.25 }
+    ],
     "topFactors": [
       { "factor": "wind", "weight": 0.7 },
       { "factor": "precipitation", "weight": 0.3 }
@@ -305,6 +355,10 @@
     "lon": -119.6328,
     "score": 1.1,
     "forecastScore": 1.3,
+    "forecastTopFactors": [
+      { "factor": "wind", "weight": 0.95 },
+      { "factor": "precipitation", "weight": 0.24 }
+    ],
     "topFactors": [
       { "factor": "wind", "weight": 0.8 },
       { "factor": "precipitation", "weight": 0.2 }

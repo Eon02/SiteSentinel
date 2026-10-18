@@ -7,6 +7,7 @@ export type Site = {
   score: number;               // today's score, 0-10
   forecastScore?: number;      // tomorrow's score
   topFactors: HazardFactor[];
+  forecastTopFactors: HazardFactor[]; // why tomorrow's score is what it is; empty without a forecast
   activeAlertCount: number;
 };
 

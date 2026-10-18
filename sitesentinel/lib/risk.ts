@@ -38,5 +38,10 @@ export function factorLabel(factor: string): string {
   return FACTOR_LABELS[factor] ?? factor.replace(/_/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 }
 
+// Labels of the heaviest few factors, e.g. ['High wind', 'Ground'].
+export function topFactorLabels(factors: { factor: string; weight: number }[], limit = 3): string[] {
+  return [...factors].sort((a, b) => b.weight - a.weight).slice(0, limit).map((f) => factorLabel(f.factor));
+}
+
 export const LIGHTNING_WINDOW_MS = 30 * 60 * 1000;
 export const DEMO_SPEED_FACTOR = 60;

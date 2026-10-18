@@ -8,9 +8,12 @@ import pytest
 
 from app.services import conditions
 from app.services.conditions import (
+    UPSERT_FORECAST_SCORE,
     UPSERT_HAZARD_SCORE,
     SiteLocation,
     condition_row,
+    forecast_input,
+    forecast_row,
     hazard_input,
     hazard_row,
     record_conditions,
@@ -39,6 +42,16 @@ NO_READINGS["current"].update(
 NO_READINGS["hourly"]["precipitation"] = [None] * 25
 NO_READINGS["hourly"]["soil_moisture_0_to_1cm"] = [None] * 25
 
+# Open-Meteo returned today but no tomorrow.
+NO_TOMORROW = copy.deepcopy(SAMPLE)
+NO_TOMORROW["daily"] = {k: v[:1] for k, v in SAMPLE["daily"].items()}
+
+# Tomorrow is there, but none of the readings the forecast model uses.
+NO_FORECAST_READINGS = copy.deepcopy(SAMPLE)
+for _key in NO_FORECAST_READINGS["daily"]:
+    if _key != "time":
+        NO_FORECAST_READINGS["daily"][_key] = [SAMPLE["daily"][_key][0], None]
+
 
 class Recorded:
     """What record_conditions() would have written, with the database stubbed out."""
@@ -46,6 +59,7 @@ class Recorded:
     def __init__(self) -> None:
         self.conditions: list[dict[str, Any]] = []
         self.hazards: list[dict[str, Any]] = []
+        self.forecasts: list[dict[str, Any]] = []
         self.result = conditions.RecordResult()
 
 
@@ -54,6 +68,7 @@ def run_record(
     bodies: dict[str, dict[str, Any]],
     *,
     hazard_write_error: Exception | None = None,
+    forecast_write_error: Exception | None = None,
 ) -> Recorded:
     """Record one site per `bodies` entry, answering each site's request with its body."""
     recorded = Recorded()
@@ -70,9 +85,15 @@ def run_record(
             raise hazard_write_error
         recorded.hazards.extend(rows)
 
+    async def fake_store_forecast_scores(rows: list[dict[str, Any]]) -> None:
+        if forecast_write_error:
+            raise forecast_write_error
+        recorded.forecasts.extend(rows)
+
     monkeypatch.setattr(conditions, "load_sites", fake_load_sites)
     monkeypatch.setattr(conditions, "store_rows", fake_store_rows)
     monkeypatch.setattr(conditions, "store_hazard_scores", fake_store_hazard_scores)
+    monkeypatch.setattr(conditions, "store_forecast_scores", fake_store_forecast_scores)
 
     def handler(request: httpx.Request) -> httpx.Response:
         site = sites[int(float(request.url.params["latitude"])) - 1]
@@ -120,12 +141,13 @@ def test_record_conditions_stores_good_sites_and_reports_failures(
     async def fake_store_rows(rows: list[dict[str, Any]]) -> None:
         stored.extend(rows)
 
-    async def fake_store_hazard_scores(rows: list[dict[str, Any]]) -> None:
+    async def fake_store_scores(rows: list[dict[str, Any]]) -> None:
         pass
 
     monkeypatch.setattr(conditions, "load_sites", fake_load_sites)
     monkeypatch.setattr(conditions, "store_rows", fake_store_rows)
-    monkeypatch.setattr(conditions, "store_hazard_scores", fake_store_hazard_scores)
+    monkeypatch.setattr(conditions, "store_hazard_scores", fake_store_scores)
+    monkeypatch.setattr(conditions, "store_forecast_scores", fake_store_scores)
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.params["latitude"] == "0.0":
@@ -248,3 +270,124 @@ def test_hazard_write_error_does_not_undo_stored_conditions(
     assert len(recorded.conditions) == 2
     assert recorded.result.scored == 0
     assert recorded.result.score_failed == {"a": "db down", "b": "db down"}
+
+
+# --- Tomorrow's forecast score -------------------------------------------------------------
+
+
+def test_forecast_input_is_the_site_local_day_after_the_observation() -> None:
+    forecast = forecast_input(_parse(SAMPLE))  # observed 2026-08-14 -> tomorrow is 08-15
+
+    assert forecast is not None
+    assert forecast["date"].isoformat() == "2026-08-15"
+    assert forecast["feels_like_max_f"] == 113.0
+    assert forecast["precip_in"] == 0.4
+    assert forecast["precip_probability_pct"] == 60
+    assert forecast["wind_gust_max_mph"] == 20.0
+    assert forecast["weather_code"] == 80
+
+
+def test_forecast_input_is_none_without_a_tomorrow_entry() -> None:
+    assert forecast_input(_parse(NO_TOMORROW)) is None
+    assert forecast_row("6045", _parse(NO_TOMORROW)) is None
+
+
+def test_forecast_row_is_on_the_0_to_10_scale_with_positive_weights() -> None:
+    row = forecast_row("6045", _parse(SAMPLE))
+
+    assert row is not None
+    assert row["site_id"] == "6045"
+    assert 0 < row["score"] < 10
+    factors = json.loads(row["top_factors"])
+    assert [f["factor"] for f in factors][0] == "heat"  # apparent temperature 113 dominates
+    for factor in factors:
+        assert set(factor) == {"factor", "risk_score", "contribution", "reason", "weight"}
+        assert factor["weight"] > 0
+        assert factor["weight"] == pytest.approx(factor["risk_score"] / 10, abs=0.001)
+        assert factor["reason"].startswith(("Forecast", "Daily"))
+
+
+def test_forecast_row_is_none_without_usable_readings() -> None:
+    assert forecast_row("6045", _parse(NO_FORECAST_READINGS)) is None
+
+
+def test_forecast_write_is_an_upsert_that_never_replaces_an_observed_row() -> None:
+    sql = " ".join(str(UPSERT_FORECAST_SCORE).split())
+
+    assert "VALUES (:site_id, CURRENT_DATE + 1, :score, true, CAST(:top_factors AS jsonb))" in sql
+    assert "ON CONFLICT (site_id, score_date) DO UPDATE SET" in sql
+    assert sql.endswith("WHERE hazard_scores.is_forecast")
+    assert "is_forecast =" not in sql  # an update leaves the flag as the forecast it already is
+
+
+def test_record_conditions_writes_today_and_tomorrow_for_each_site(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = run_record(monkeypatch, {"a": SAMPLE, "b": CLEAR})
+
+    result = recorded.result
+    assert (result.stored, result.scored, result.forecast_scored) == (2, 2, 2)
+    assert [r["site_id"] for r in recorded.forecasts] == ["a", "b"]
+    # Today's thunderstorm is 10.0; tomorrow's score comes from the daily forecast, not it.
+    assert {h["site_id"]: h["score"] for h in recorded.hazards}["a"] == 10.0
+    assert {f["site_id"]: f["score"] for f in recorded.forecasts}["a"] < 10
+    assert not (result.forecast_skipped or result.forecast_failed)
+
+
+def test_a_site_without_tomorrows_forecast_still_gets_its_live_score(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = run_record(monkeypatch, {"x": NO_TOMORROW, "y": NO_FORECAST_READINGS})
+
+    assert recorded.result.scored == 2
+    assert recorded.result.forecast_scored == 0
+    assert recorded.result.forecast_skipped == ["x", "y"]  # their forecast rows are left alone
+    assert recorded.forecasts == []
+
+
+def test_a_site_without_current_readings_still_gets_its_forecast(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = run_record(monkeypatch, {"blank": NO_READINGS})
+
+    assert recorded.result.score_skipped == ["blank"]
+    assert [f["site_id"] for f in recorded.forecasts] == ["blank"]
+
+
+def test_forecast_model_error_does_not_block_conditions_or_live_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def explode(forecast: dict[str, Any]) -> dict[str, Any]:
+        raise RuntimeError("forecast bug")
+
+    monkeypatch.setattr(conditions, "tomorrow_hazard_score", explode)
+    recorded = run_record(monkeypatch, {"a": SAMPLE, "b": CLEAR})
+
+    assert recorded.result.stored == 2
+    assert recorded.result.scored == 2
+    assert recorded.result.forecast_failed == {"a": "forecast bug", "b": "forecast bug"}
+    assert recorded.forecasts == []
+
+
+def test_forecast_write_error_does_not_undo_conditions_or_live_scores(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = run_record(
+        monkeypatch, {"a": SAMPLE, "b": CLEAR}, forecast_write_error=ConnectionError("db down")
+    )
+
+    assert recorded.result.stored == 2
+    assert len(recorded.conditions) == len(recorded.hazards) == 2
+    assert recorded.result.scored == 2
+    assert recorded.result.forecast_scored == 0
+    assert recorded.result.forecast_failed == {"a": "db down", "b": "db down"}
+
+
+def test_live_write_error_does_not_stop_the_forecast_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    recorded = run_record(monkeypatch, {"a": SAMPLE}, hazard_write_error=ConnectionError("db down"))
+
+    assert recorded.result.score_failed == {"a": "db down"}
+    assert recorded.result.forecast_scored == 1
+    assert [f["site_id"] for f in recorded.forecasts] == ["a"]

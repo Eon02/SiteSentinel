@@ -6,7 +6,7 @@ import { ArrowDown, ArrowUp, ChevronDown, Minus, Search, TriangleAlert } from 'l
 import ConditionsSummary from './ConditionsSummary';
 import RiskBadge from './RiskBadge';
 import { OfflineNote, Skeleton } from './Skeleton';
-import { factorLabel, formatScore } from '@/lib/risk';
+import { factorLabel, formatScore, topFactorLabels } from '@/lib/risk';
 import { usePolling } from '@/lib/usePolling';
 import type { Site, SiteDetail } from '@/lib/types';
 
@@ -110,6 +110,11 @@ function SiteRow({ site, rank, selected, onSelect }: { site: Site; rank: number;
               <RiskBadge score={site.score} />
               <Forecast today={site.score} tomorrow={site.forecastScore} />
             </span>
+            {site.forecastTopFactors.length > 0 && (
+              <span className="block text-sm text-slate-600">
+                Tomorrow: {topFactorLabels(site.forecastTopFactors).join(', ')}
+              </span>
+            )}
           </span>
           <ChevronDown
             size={20}
