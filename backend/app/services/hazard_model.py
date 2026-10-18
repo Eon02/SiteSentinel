@@ -1,13 +1,15 @@
-"""Current hazard score: a 0-100 environmental severity index for one site's current weather.
+"""Hazard scores: 0-100 environmental severity indexes for a site's current weather and tomorrow.
 
-Implements .claude/specs/current_hazard_score.md. current_hazard_score() is pure: it scores
-whatever readings are usable, treats missing or invalid ones as unavailable (never as safe), and
-never raises on bad input. All curves and weights are prototype assumptions, not OSHA thresholds.
+Implements .claude/specs/current_hazard_score.md (current_hazard_score) and
+forecast_hazard_score.md (tomorrow_hazard_score). Both share one aggregation, aggregate_risk. The
+models are pure: they score whatever readings are usable, treat missing or invalid ones as
+unavailable (never as safe), and never raise on bad input. All curves and weights are prototype
+assumptions, not OSHA thresholds.
 """
 
 import math
 from bisect import bisect_right
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any
 
 HEAT_POINTS = [(70, 0), (80, 10), (90, 25), (103, 65), (115, 85), (125, 100)]
@@ -30,7 +32,7 @@ SEVERE_WEATHER_SCORES = {
 THUNDERSTORM_CODES = {95, 96, 97, 99}
 
 WEIGHTS = {"heat": 0.30, "wind": 0.30, "ground": 0.20, "severe_weather": 0.40}
-FORECAST_COMPOUND_BONUS = 0.5  # share of the other components' compound hazard added to tomorrow's
+COMPOUND_BONUS = 0.5  # λ: share of the other components' compound hazard added to the worst one
 MAX_FACTORS = 3
 
 
@@ -87,24 +89,15 @@ def severe_weather_risk(weather_code: int | None) -> float | None:
 
 
 def aggregate_risk(scores: Mapping[str, float | None]) -> float | None:
-    """Weighted combination of the available components; missing ones are not renormalized."""
-    available = {k: v for k, v in scores.items() if k in WEIGHTS and v is not None}
-    if not available:
-        return None
-    # Clamp so float error can never push a base below 0 (a negative ** fraction is complex).
-    survive = (
-        (1 - min(max(score / 100, 0.0), 1.0)) ** WEIGHTS[name] for name, score in available.items()
-    )
-    return 100 * (1 - math.prod(survive))
+    """The overall index: the worst component plus part of the others' compound hazard.
 
-
-def aggregate_forecast_risk(scores: Mapping[str, float | None]) -> float | None:
-    """Tomorrow's index: the worst component plus half of the others' compound bonus.
-
-    R = 100 * (m + 0.5 * (1 - m) * C), where m is the highest component score (ties go to the
-    first of heat, wind, ground, severe weather) and C combines the rest like aggregate_risk.
-    A lone component is its own score; missing ones are not renormalized.
+    R = 100 * (m + λ(1 - m)C), where m is the highest component score (ties go to the first of
+    heat, wind, ground, severe weather), C = 1 - Π(1 - r_i)^w_i over the other components and
+    λ = COMPOUND_BONUS. A lone component is its own score, and any component at 100 makes the
+    index 100. Missing components are left out, not renormalized. Shared by today's and
+    tomorrow's models.
     """
+    # Clamp so float error can never push a base below 0 (a negative ** fraction is complex).
     available = {
         name: min(max(score / 100, 0.0), 1.0)
         for name in WEIGHTS
@@ -117,7 +110,7 @@ def aggregate_forecast_risk(scores: Mapping[str, float | None]) -> float | None:
     compound = 1 - math.prod(
         (1 - r) ** WEIGHTS[name] for name, r in available.items() if name != dominant
     )
-    return 100 * (m + FORECAST_COMPOUND_BONUS * (1 - m) * compound)
+    return 100 * (m + COMPOUND_BONUS * (1 - m) * compound)
 
 
 def rank_top_factors(
@@ -125,15 +118,13 @@ def rank_top_factors(
     weather_code: int | None,
     reasons: Mapping[str, str],
     limit: int = MAX_FACTORS,
-    aggregate: Callable[[Mapping[str, float | None]], float | None] = aggregate_risk,
 ) -> list[dict[str, Any]]:
     """Components with a positive score, ranked by leave-one-out contribution.
 
     A thunderstorm always comes first. When a saturated score zeroes the other contributions,
-    the component score breaks the tie, so those hazards are still listed. `aggregate` is the
-    index the contributions are measured against.
+    the component score breaks the tie, so those hazards are still listed.
     """
-    total = aggregate(scores)
+    total = aggregate_risk(scores)
     if total is None:
         return []
     storm = weather_code in THUNDERSTORM_CODES
@@ -141,7 +132,7 @@ def rank_top_factors(
     for name, score in scores.items():
         if score is None or score <= 0:
             continue
-        impact = max(0.0, total - (aggregate({**scores, name: 0}) or 0.0))
+        impact = max(0.0, total - (aggregate_risk({**scores, name: 0}) or 0.0))
         thunderstorm = name == "severe_weather" and storm
         candidates.append(
             (
@@ -264,8 +255,8 @@ def tomorrow_hazard_score(forecast: Mapping[str, Any]) -> dict[str, Any]:
             else f"Daily WMO code {code} indicates potentially hazardous weather conditions."
         ),
     }
-    total = aggregate_forecast_risk(scores)
+    total = aggregate_risk(scores)
     return {
         "hazard_score": round(total, 2) if total is not None else None,
-        "top_factors": rank_top_factors(scores, code, reasons, aggregate=aggregate_forecast_risk),
+        "top_factors": rank_top_factors(scores, code, reasons),
     }

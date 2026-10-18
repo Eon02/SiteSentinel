@@ -89,7 +89,7 @@ If a forecast WMO code is a thunderstorm code, the **daily** overall risk is 100
 
 ## 5. Aggregate and explain — v2 max hazard + compound bonus
 
-Use the v2 aggregation below. This is **forecast-only**: the current (observed) model combines its components with a weighted noisy-OR, not v2, so today's and tomorrow's scores are not directly comparable. Among *available* component scores `r_i=s_i/100`, select dominant `k` with maximum score; use a stable tie order of heat, wind, ground, severe_weather. Define `m=r_k` and:
+Use the same v2 aggregation as the current model (`current_hazard_score.md` v0.8 §5). Today's and tomorrow's scores are still not directly comparable, because their ground components use different functions and inputs. Among *available* component scores `r_i=s_i/100`, select dominant `k` with maximum score; use a stable tie order of heat, wind, ground, severe_weather. Define `m=r_k` and:
 
 \[
 C=1-\prod_{i\in A,\ i\ne k}(1-r_i)^{w_i}

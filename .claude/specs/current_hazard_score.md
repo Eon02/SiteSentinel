@@ -1,6 +1,6 @@
 # Current Utility Construction Hazard Score — Specification
 
-**Status:** Draft v0.7 (graceful missing-data handling; timestamp freshness and site-procedure logic out of scope)
+**Status:** Draft v0.8 (v2 aggregation: worst component plus a compound bonus, shared with the forecast model; graceful missing-data handling; timestamp freshness and site-procedure logic out of scope)
 
 ## 1. Purpose
 
@@ -171,13 +171,18 @@ Rain/snow/fog codes are included for **immediate operating conditions** (visibil
 
 Invalid/unknown WMO codes are treated as **unavailable**, not zero hazard; other components can still be scored.
 
-## 5. Aggregation — version 1 weights locked for prototype
+## 5. Aggregation — v2 max hazard + compound bonus (shared with the forecast model)
 
-Let component scores `s_i` be on 0–100, with `r_i = s_i / 100`.
+Let component scores `s_i` be on 0–100, with `r_i = s_i / 100`, over the set `A` of *available* components. Select the dominant component `k` with the maximum score, using a stable tie order of heat, wind, ground, severe_weather. Let `m = r_k` and:
 
 \[
-\boxed{R=100\left(1-\prod_{i\in\{heat,wind,ground,severe\}}(1-r_i)^{w_i}\right)}
+C=1-\prod_{i\in A,\ i\ne k}(1-r_i)^{w_i}
 \]
+\[
+\boxed{R=100[m+\lambda(1-m)C]},\qquad \lambda=0.5
+\]
+
+This keeps the worst hazard's score, then adds half of the compound hazard from the others. If only one component is present, the overall equals its score. If none are available, return `null`. *(v0.7 used the weighted noisy-OR, `R = 100(1 − Π(1−r_i)^{w_i})`, over all components. It understated sites with one serious hazard; for example, a lone 70 heat score gave about 30.)* The forecast model (`forecast_hazard_score.md` §5) uses the same aggregation.
 
 | Component | Weight |
 |---|---:|
@@ -186,15 +191,15 @@ Let component scores `s_i` be on 0–100, with `r_i = s_i / 100`.
 | Ground | 0.20 |
 | Severe weather | 0.40 |
 
-These weights are **subjective prototype importance parameters**, not probabilities, regression coefficients, or OSHA-sanctioned risk weights. Their sum (1.20) does *not* need to equal 1. All scores are bounded to 0–100, and raising any one input hazard cannot lower the overall score. A full component score of 100 forces the composite to 100. Thunderstorm codes `{95, 96, 97, 99}` score 100 and thus dominate without a separate boolean flag. Explanations stay in `top_factors[].reason`; no site-specific procedure checks.
+These weights are **subjective prototype importance parameters**, not probabilities, regression coefficients, or OSHA-sanctioned risk weights. Their sum (1.20) does *not* need to equal 1; under v2 they only shape the compound bonus `C`, not the dominant term. All scores are bounded to 0–100, and the overall score is never below the worst component. A full component score of 100 forces the composite to 100. **Limitation:** selecting one maximum with unequal weights can introduce small discontinuities and local non-monotonic behavior near ties, even with deterministic tie-breaking; sensitivity-test before operational use. Thunderstorm codes `{95, 96, 97, 99}` score 100 and thus dominate without a separate boolean flag. Explanations stay in `top_factors[].reason`; no site-specific procedure checks.
 
 **Worked example:** heat 70, wind 60, ground 40, severe weather 0 produces:
 
 \[
-R=100\left[1-(0.30)^{0.30}(0.40)^{0.30}(0.60)^{0.20}(1.00)^{0.40}\right]\approx\boxed{52.20}
+m=0.70,\quad C=1-(0.40)^{0.30}(0.60)^{0.20}(1.00)^{0.40}\approx0.3141,\quad R=100[0.70+0.5(0.30)(0.3141)]\approx\boxed{74.71}
 \]
 
-Not a 52.20% chance of closure. This is a heuristic environmental severity index.
+Not a 74.71% chance of closure. This is a heuristic environmental severity index.
 
 ## 6. Top contributing factors — required
 
@@ -204,13 +209,13 @@ Rank **hazard categories** (heat, wind, ground, severe weather), not raw sensor 
 \Delta_i=R(s_1,\ldots,s_n)-R(s_1,\ldots,s_i=0,\ldots,s_n)
 \]
 
-`contribution` is the reduction in overall index points when that category is removed. Values are nonnegative but are **not additive shares** and generally do not sum to the total. For the worked example:
+`contribution` is the reduction in overall index points when that category is removed (recomputing the dominant component, so removing the worst hazard promotes the next one). Values are nonnegative but are **not additive shares** and generally do not sum to the total. For the worked example:
 
 | Factor | Component score | Leave-one-out impact (index points) |
 |---|---:|---:|
-| Heat | 70 | 20.79 |
-| Wind | 60 | 15.12 |
-| Ground | 40 | 5.14 |
+| Heat | 70 | 12.77 |
+| Wind | 60 | 3.26 |
+| Ground | 40 | 1.11 |
 | Severe weather | 0 | 0.00 |
 
 Sort descending by `contribution`; return up to 3 with positive component scores (a non-thunderstorm contribution can be zero if another hazard saturates the total score). Each item has `factor`, `risk_score`, `contribution`, `reason`. Explain the relevant measurements (heat index, gust/sustained wind, rainfall and surface wetness, WMO code) in `reason`. When thunderstorm code is present, **always put Thunderstorm first**, even if impact rankings tie at a saturated score. When any component is 100, other components may have zero leave-one-out impact due to score saturation; this does **not** mean those conditions are safe. In particular, use the top three largest *component scores* as a secondary tie-breaker for relevant hazards when an overall score of 100 suppresses their measured contributions. For the normal non-saturated case, hide factors with zero component scores. No separate stop-work flag.
@@ -219,11 +224,11 @@ Sort descending by `contribution`; return up to 3 with positive component scores
 
 ```json
 {
-  "hazard_score": 52.2,
+  "hazard_score": 74.71,
   "top_factors": [
-    {"factor": "heat", "risk_score": 70.0, "contribution": 20.79, "reason": "Elevated heat index raises heat-stress concerns."},
-    {"factor": "wind", "risk_score": 60.0, "contribution": 15.12, "reason": "Wind conditions warrant reassessing lifting and elevated work."},
-    {"factor": "ground", "risk_score": 40.0, "contribution": 5.14, "reason": "Rain and surface wetness may affect equipment access."}
+    {"factor": "heat", "risk_score": 70.0, "contribution": 12.77, "reason": "Elevated heat index raises heat-stress concerns."},
+    {"factor": "wind", "risk_score": 60.0, "contribution": 3.26, "reason": "Wind conditions warrant reassessing lifting and elevated work."},
+    {"factor": "ground", "risk_score": 40.0, "contribution": 1.11, "reason": "Rain and surface wetness may affect equipment access."}
   ]
 }
 ```
@@ -336,14 +341,20 @@ from math import prod
 WEIGHTS = {"heat": 0.30, "wind": 0.30, "ground": 0.20, "severe_weather": 0.40}
 
 
+LAMBDA = 0.5  # compound bonus strength
+
+
 def aggregate_risk(scores: dict[str, float | None]) -> float | None:
-    available = {k: v for k, v in scores.items() if k in WEIGHTS and v is not None}
+    available = {k: scores[k] / 100 for k in WEIGHTS if scores.get(k) is not None}
     if not available:
         return None
-    return 100 * (1 - prod(
-        (1 - score / 100) ** WEIGHTS[name]
-        for name, score in available.items()
-    ))
+    dominant = max(available, key=available.get)  # stable tie order: heat, wind, ground, severe
+    m = available[dominant]
+    compound = 1 - prod(
+        (1 - r) ** WEIGHTS[name]
+        for name, r in available.items() if name != dominant
+    )
+    return 100 * (m + LAMBDA * (1 - m) * compound)
 
 
 def rank_top_factors(scores: dict[str, float], weather_code: int,

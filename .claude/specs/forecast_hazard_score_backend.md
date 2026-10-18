@@ -9,7 +9,7 @@ The live hazard score now lands in `hazard_scores` (today's row, `is_forecast=fa
 **Goal / exit criteria:** tomorrow's score **and its top reasons** appear in every site card, less prominently than today's score.
 
 **Decisions:**
-- The forecast uses the **v2 aggregation** from `.claude/specs/forecast_hazard_score.md` §5. The live model stays on noisy-OR.
+- The forecast uses the **v2 aggregation** from `.claude/specs/forecast_hazard_score.md` §5. *(Later the live model moved to v2 too, current spec v0.8; the two now share `aggregate_risk`.)*
 - The forecast is computed in the **conditions worker** (every 15 min), reusing the Open-Meteo daily forecast it already fetches. No new API calls.
 - UI: keep the header "Tmrw 4.6 ↑" on the collapsed card, and show a small grey "Tomorrow: Ground, High wind" line only when the card is expanded.
 
@@ -17,7 +17,7 @@ Model math is defined in `.claude/specs/forecast_hazard_score.md` (v0.3). Work h
 
 ## Step 0: Spec housekeeping (done)
 - This file lives alongside `current_hazard_score_backend.md`.
-- `forecast_hazard_score.md` §5 now says v2 is forecast-only and the current model uses the weighted noisy-OR.
+- `forecast_hazard_score.md` §5 now says both models share the v2 aggregation.
 
 ## Step 1: Model, in `backend/app/services/hazard_model.py` (extend, don't duplicate)
 
@@ -28,8 +28,7 @@ Add `tomorrow_hazard_score(forecast: Mapping[str, Any]) -> dict` (pure, never ra
 - `severe_weather_risk`, `SEVERE_WEATHER_SCORES`, `THUNDERSTORM_CODES`, `WEIGHTS`
 
 New pieces:
-- `aggregate_forecast_risk(scores)`, the v2 formula: dominant `m` (tie order heat, wind, ground, severe_weather, i.e. `WEIGHTS` order), `C = 1 − Π_{i≠k}(1−r_i)^{w_i}`, `R = 100[m + 0.5(1−m)C]`. Clamp each `r` to [0, 1]. `None` if nothing is available.
-- **Generalize `rank_top_factors`** with an `aggregate=aggregate_risk` parameter, so the forecast reuses the same leave-one-out ranking with thunderstorm first. The live behavior is unchanged.
+- The v2 formula: dominant `m` (tie order heat, wind, ground, severe_weather, i.e. `WEIGHTS` order), `C = 1 − Π_{i≠k}(1−r_i)^{w_i}`, `R = 100[m + 0.5(1−m)C]`. Clamp each `r` to [0, 1]. `None` if nothing is available. It was first added as a forecast-only `aggregate_forecast_risk`; now that the live model uses v2 too, it is the shared `aggregate_risk`, and `rank_top_factors` measures contributions against it for both models.
 - Forecast reasons per spec §6:
   - Every reason is worded as a forecast.
   - The precipitation reason adds the max probability as context only, says "precipitation" rather than "rain", and notes that soil moisture is unavailable.

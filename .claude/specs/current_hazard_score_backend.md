@@ -129,7 +129,7 @@ Nothing in the model output needs a new column.
 |---|---|---|
 | `lib/data.ts` `selectSites()` | `COALESCE(t.score, 0)` from `hazard_scores` where `score_date = current_date`; `top_factors` cast to `HazardFactor[]` | Row keyed on `CURRENT_DATE`; `top_factors` is always a JSON array (possibly `[]`) |
 | `lib/types.ts` | `score: number // 0-10`, `HazardFactor = { factor: string; weight: number }` | `score` in [0, 10]; each factor has a string `factor` and a numeric `weight` |
-| `lib/risk.ts` `riskLevel()` | Low < 3 ≤ Moderate < 6 ≤ High < 8 ≤ Extreme | 0–10 scale. A thunderstorm (model 100) gives 10.0, "Extreme". The worked example (52.2) gives 5.22, "Moderate". |
+| `lib/risk.ts` `riskLevel()` | Low < 3 ≤ Moderate < 6 ≤ High < 8 ≤ Extreme | 0–10 scale. A thunderstorm (model 100) gives 10.0, "Extreme". The worked example (74.71, model v0.8) gives 7.47, "High". |
 | `lib/risk.ts` `formatScore()` | Rounds to one decimal | Two-decimal storage is fine |
 | `lib/risk.ts` `factorLabel()` | Known keys get nice labels, others are auto-capitalized | `heat` → "Heat", `wind` → "High wind", `ground` → "Ground", `severe_weather` → "Severe weather", `Thunderstorm` → "Thunderstorm" |
 | `components/FactorBars.tsx` ("Why this score") | Sorts by `weight` desc; label shows `weight / Σweight` as %, bar width is `weight / max`; `key={f.factor}`; empty list shows "No hazard factors reported today." | `weight` > 0 for every stored factor (the model only lists positive component scores); `factor` is unique per row |
@@ -143,7 +143,7 @@ Nothing in the model output needs a new column.
 
 **`backend/tests/test_hazard_model.py`** (new, pure unit tests, no DB):
 - Every reference assertion in model spec §7 ("Reference tests") and §7.2 ("Missing-data examples").
-- The worked example (heat 70, wind 60, ground 40, severe 0) gives `aggregate_risk ≈ 52.20` with leave-one-out contributions ≈ 20.79, 15.12, 5.14.
+- The worked example (heat 70, wind 60, ground 40, severe 0) gives `aggregate_risk ≈ 74.71` with leave-one-out contributions ≈ 12.77, 3.26, 1.11 (model v0.8; v0.7 gave 52.20).
 - Thunderstorm (code 95) plus other hazards: score 100, Thunderstorm first.
 - Invalid inputs are treated as unavailable without raising: `"abc"`, `float("nan")`, `float("inf")`, `True`, `-1` wind, `1.5` soil moisture, `95.5` and `999` weather codes.
 - No reason string contains `"None"`.

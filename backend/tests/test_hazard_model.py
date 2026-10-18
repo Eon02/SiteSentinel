@@ -5,7 +5,6 @@ from typing import Any
 import pytest
 
 from app.services.hazard_model import (
-    aggregate_forecast_risk,
     aggregate_risk,
     current_hazard_score,
     estimate_saturation,
@@ -55,13 +54,13 @@ def test_severe_weather_risk() -> None:
 
 def test_aggregate_does_not_renormalize_missing_components() -> None:
     assert aggregate_risk({"heat": None, "wind": None}) is None
-    assert aggregate_risk({"heat": 50, "wind": None}) == pytest.approx(100 * (1 - 0.5**0.30))
+    assert aggregate_risk({"heat": 50, "wind": None}) == 50  # a lone component is its own score
 
 
 def test_worked_example() -> None:
-    # heat 70, wind 60, ground 40, severe 0 -> 52.20, from the model spec
+    # heat 70, wind 60, ground 40, severe 0: m = 0.7, C = 1 - 0.4^0.3 * 0.6^0.2 -> 74.71
     scores = {"heat": 70, "wind": 60, "ground": 40, "severe_weather": 0}
-    assert aggregate_risk(scores) == pytest.approx(52.20, abs=0.01)
+    assert aggregate_risk(scores) == pytest.approx(74.71, abs=0.01)
 
     # The same scenario from raw readings: heat index 106 -> 70, gust 33.75 -> 60 (the lighter
     # sustained wind loses), soil moisture 0.405 -> wetness 80 -> ground 40, clear sky -> 0.
@@ -74,7 +73,7 @@ def test_worked_example() -> None:
             "weather_code": 0,
         }
     )
-    assert result["hazard_score"] == pytest.approx(52.20, abs=0.01)
+    assert result["hazard_score"] == pytest.approx(74.71, abs=0.01)
     assert [(f["factor"], f["risk_score"]) for f in result["top_factors"]] == [
         ("heat", 70.0),
         ("wind", 60.0),
@@ -90,9 +89,9 @@ def test_leave_one_out_contributions_match_the_spec() -> None:
     ranked = rank_top_factors(scores, 0, reasons)
 
     assert [(f["factor"], f["risk_score"], f["contribution"]) for f in ranked] == [
-        ("heat", 70.0, 20.79),
-        ("wind", 60.0, 15.12),
-        ("ground", 40.0, 5.14),
+        ("heat", 70.0, 12.77),
+        ("wind", 60.0, 3.26),
+        ("ground", 40.0, 1.11),
     ]
 
 
@@ -123,7 +122,7 @@ def test_missing_components_are_not_called_safe() -> None:
     result = current_hazard_score({"heat_index_f": 95, "wind_gust_mph": None})
 
     assert [f["factor"] for f in result["top_factors"]] == ["heat"]
-    assert result["hazard_score"] == pytest.approx(100 * (1 - (1 - 0.4038) ** 0.30), abs=0.05)
+    assert result["hazard_score"] == pytest.approx(40.38, abs=0.01)  # heat alone, not renormalized
 
 
 @pytest.mark.parametrize(
@@ -153,7 +152,7 @@ def test_invalid_input_is_unavailable_and_never_raises(bad: dict[str, Any]) -> N
 def test_invalid_input_does_not_hide_valid_input() -> None:
     result = current_hazard_score({"heat_index_f": "abc", "wind_gust_mph": 32, "weather_code": 999})
 
-    assert result["hazard_score"] == pytest.approx(100 * (1 - 0.45**0.30), abs=0.01)
+    assert result["hazard_score"] == 55  # the wind score alone
     assert [f["factor"] for f in result["top_factors"]] == ["wind"]
 
 
@@ -216,24 +215,22 @@ def test_ground_reason_warns_when_moisture_exceeds_porosity() -> None:
 # --- Tomorrow's forecast score -------------------------------------------------------------
 
 
-def test_forecast_aggregate_keeps_the_worst_component_and_adds_half_the_compound() -> None:
+def test_aggregate_keeps_the_worst_component_and_adds_half_the_compound() -> None:
     scores = {"heat": 70, "wind": 60, "ground": None, "severe_weather": None}
     compound = 1 - (1 - 0.6) ** 0.30  # wind is the only other component
-    assert aggregate_forecast_risk(scores) == pytest.approx(100 * (0.7 + 0.5 * 0.3 * compound))
+    assert aggregate_risk(scores) == pytest.approx(100 * (0.7 + 0.5 * 0.3 * compound))
 
 
-def test_forecast_aggregate_of_one_component_is_that_component() -> None:
-    assert aggregate_forecast_risk({"wind": 42.5}) == pytest.approx(42.5)
-    assert aggregate_forecast_risk({"heat": None, "wind": None}) is None
-    assert aggregate_forecast_risk({"heat": 100, "wind": 10}) == 100
+def test_aggregate_of_one_component_is_that_component() -> None:
+    assert aggregate_risk({"wind": 42.5}) == pytest.approx(42.5)
+    assert aggregate_risk({"heat": None, "wind": None}) is None
+    assert aggregate_risk({"heat": 100, "wind": 10}) == 100
 
 
-def test_forecast_aggregate_breaks_ties_in_a_stable_order() -> None:
+def test_aggregate_breaks_ties_in_a_stable_order() -> None:
     # Equal scores: whichever is dominant, the result is the same and deterministic.
     scores = {"wind": 50, "heat": 50, "ground": 50, "severe_weather": 50}
-    assert aggregate_forecast_risk(scores) == aggregate_forecast_risk(
-        dict(reversed(scores.items()))
-    )
+    assert aggregate_risk(scores) == aggregate_risk(dict(reversed(scores.items())))
 
 
 def test_forecast_reference_assertions() -> None:
