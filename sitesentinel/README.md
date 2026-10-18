@@ -22,6 +22,19 @@ BLOB_READ_WRITE_TOKEN=...     # optional; without it, photos are stored as data 
 BACKEND_URL=http://localhost:8000   # FastAPI backend, used to text crews (default shown)
 ```
 
+## Crewmember View (phones)
+
+On screens narrower than 768 px the home page opens in a minimal **Crewmember View** (`components/CrewView.tsx`):
+the crew member's site (remembered, else the nearest to the phone, else the first), a weather icon for the next 12
+hours (sun, partly cloudy, cloudy, fog, drizzle, rain, snow or storm, picked as the most significant weather in that
+window) with temperature, chance of rain and high/low, a large **Report a hazard** button, and the site's active
+alerts with the lightning countdown. "Supervisor view" / "Crew view" switch between the two and the choice is
+remembered on the device. Weather comes from `GET /api/sites/[id]/forecast` (Open-Meteo, fetched server-side), so
+the service worker caches it and the last forecast still shows offline.
+
+The report page has a **← Cancel** arrow (and **← Back** after sending): it returns to the previous app page, such
+as the crew view, or home if the page was opened directly, and asks before discarding a half-filled report.
+
 ## Assigned crew
 
 Each site page has an **Assigned crew** section listing the workers attached to the site (the backend's
@@ -53,6 +66,7 @@ template. Each send costs Twilio credit per crew member and needs signal. Mock m
 | `GET /api/reports`, `POST /api/reports` | Recent crew reports for the map; create a report (multipart) |
 | `POST /api/sites/[id]/crew`, `DELETE /api/sites/[id]/crew/[crewId]` | Add / remove a site's assigned crew |
 | `POST /api/sites/[id]/sms` | Text a message to the site's crew (via the backend) |
+| `GET /api/sites/[id]/forecast` | Next 12 hours of weather at the site, simplified (Crewmember View) |
 | `POST /api/demo/strike`, `POST /api/demo/clear`, `POST /api/alerts/[id]/clear` | Demo and alert controls |
 
 All data access goes through `lib/data.ts`. Cache Components is enabled, so route handlers don't export
@@ -68,13 +82,17 @@ deployed site); `npm run dev` skips it so cached code never gets in the way whil
   every file of the build in `public/sw-manifest.json` (git-ignored, about 7 MB), and the worker caches all of it,
   including chunks loaded only on demand such as the report form's map. It re-checks on every app load, so a new
   deploy is picked up and the old build's files are dropped.
-- **Pages:** `/`, `/report` and `/offline` are cached right away, so crews can report hazards offline even if they
-  never opened the form in signal; other pages are cached as they're visited. A page never opened shows `/offline`.
+- **Every page is cached up front**, visited or not: right after install, and again on app loads at most every 30
+  minutes, the service worker fetches the site list and caches `/`, `/report`, `/offline`, `/demo` and `/site/<id>`
+  for every site, plus each site's data (`/api/sites/<id>`, re-downloaded at most hourly). It works two requests at
+  a time to go easy on the database. Only a URL that isn't a page of the app shows `/offline` without signal. Tapping
+  a link offline falls back to a full page load, which the worker answers from that cache.
 - **Data** (`GET /api/*`) comes from the network when possible (after 6 s on a weak signal it falls back) and
   otherwise from the last saved copy. Those responses carry `x-sitesentinel-offline: 1`; `usePolling` then reports
   `offline: true` and the existing "Offline, retrying…" notes show. Everything refetches as soon as the connection
   returns.
-- **Map tiles and photos** already viewed are cached (capped at 2000 tiles and 200 images). Areas never viewed show
+- **Map support files** (the MapLibre web worker) and icons are cached with the app code. **Map tiles and photos**
+  already viewed are cached (capped at 2000 tiles and 200 images). Areas never viewed show
   a plain map background offline; pins still work.
 - **Crew reports** go through `lib/reportQueue.ts`: each report (photo included) is saved in IndexedDB first, then
   uploaded. Without signal the form says "Report saved", a strip under the header shows how many are waiting, and

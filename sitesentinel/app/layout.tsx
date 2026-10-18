@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from "next";
+import { Suspense } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import AlertsProvider from "@/components/AlertsProvider";
 import AlertBanner from "@/components/AlertBanner";
 import OfflineSupport from "@/components/OfflineSupport";
+import { NavTracker } from "@/lib/navHistory";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -57,6 +59,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             <AlertBanner />
             <OfflineSupport />
           </header>
+          {/* reads the URL, so it needs its own Suspense boundary under Cache Components */}
+          <Suspense fallback={null}>
+            <NavTracker />
+          </Suspense>
           <main className="flex flex-1 flex-col lg:min-h-0 lg:overflow-y-auto">{children}</main>
         </AlertsProvider>
       </body>

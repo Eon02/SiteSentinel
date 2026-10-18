@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { CloudLightning, Flame, Thermometer, TriangleAlert, Waves, Wind, X, type LucideIcon } from 'lucide-react';
 import { useAlerts } from './AlertsProvider';
 import LightningCountdown, { LightningAutoClear } from './LightningCountdown';
+import { useCrewViewActive } from '@/lib/crewViewState';
 import type { Alert, AlertType } from '@/lib/types';
 
 const TYPE_ICONS: Record<AlertType, LucideIcon> = {
@@ -22,7 +23,17 @@ export default function AlertBanner() {
   const { data: alerts, offline } = useAlerts();
   // Kept in memory: dismissals last while the app is open and reset on reload.
   const [dismissed, setDismissed] = useState<Set<string>>(() => new Set());
+  const crewView = useCrewViewActive();
 
+  // The Crewmember View shows its own site's alerts, so the bars stay hidden there. Lightning
+  // alerts still auto-clear in the background, exactly as when their bar is dismissed.
+  if (crewView) {
+    return (
+      <>
+        {alerts?.filter((a) => a.type === 'lightning').map((a) => <LightningAutoClear key={a.id} alert={a} />)}
+      </>
+    );
+  }
   if (!alerts?.length && !offline) return null;
   const visible = alerts?.filter((a) => !dismissed.has(dismissKey(a))) ?? [];
   const hiddenCount = (alerts?.length ?? 0) - visible.length;

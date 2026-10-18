@@ -3,7 +3,8 @@
  * Caching
  *   /_next/static/*, /icons/*  cache-first (file names are content-hashed); the whole build is
  *                               cached up front from /sw-manifest.json (scripts/sw-manifest.mjs)
- *   pages (navigations)         network-first with a timeout, then the cached page, then /offline
+ *   pages (navigations)         network-first with a timeout, then the cached page, then /offline;
+ *                               every page (incl. /site/<id> for all sites) is cached up front
  *   RSC payloads (client nav)   network-first, then cache
  *   GET /api/*                  network-first with a timeout, then the last saved response,
  *                               marked with an `x-sitesentinel-offline: 1` header so the UI can say
@@ -18,19 +19,34 @@
  * Bump VERSION when changing this file's caching rules; old caches are deleted on activate.
  */
 
-const VERSION = 'v2';
+const VERSION = 'v3';
 const CACHES = {
   pages: `ss-pages-${VERSION}`,
   static: `ss-static-${VERSION}`,
   data: `ss-data-${VERSION}`,
+  meta: `ss-meta-${VERSION}`,
   tiles: `ss-tiles-${VERSION}`,
   images: `ss-images-${VERSION}`,
 };
 const PRECACHE_PAGES = ['/', '/report', '/offline'];
+const APP_PAGES = ['/', '/report', '/offline', '/demo']; // plus /site/<id> for every site
+const PAGE_SYNC_EVERY_MS = 30 * 60 * 1000; // check for new sites / missing pages at most this often
+const DATA_REFRESH_EVERY_MS = 60 * 60 * 1000; // re-download each site's data at most this often
+const PAGE_SYNC_CONCURRENCY = 2; // gentle on the server and its database connection pool
+const META = `ss-meta-${VERSION}`;
 const OFFLINE_HEADER = 'x-sitesentinel-offline';
 const NETWORK_TIMEOUT_MS = { page: 5000, data: 6000 };
 const MAX_ENTRIES = { tiles: 2000, images: 200 };
 const TILE_HOSTS = ['tiles.openfreemap.org'];
+// Files outside /_next/static that the app needs offline (the map's web worker, icons, ...).
+const EXTRA_ASSETS = [
+  '/maplibre-gl-worker.mjs',
+  '/manifest.webmanifest',
+  '/favicon.ico',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/apple-touch-icon.png',
+];
 
 // Shared with lib/offlineDb.ts and lib/reportQueue.ts; keep in sync.
 const QUEUE_DB = 'sitesentinel';
@@ -72,6 +88,8 @@ async function precache() {
     }
   }
   const synced = await syncAssets();
+  // Every other page is cached right after install (syncAllPages, triggered by the app's first
+  // load), so installing stays quick and the worker starts protecting the core pages sooner.
   if (!synced) {
     // No manifest (e.g. a build without the postbuild step): cache what the pages reference.
     const staticCache = await caches.open(CACHES.static);
@@ -97,7 +115,7 @@ async function syncAssets() {
     const path = new URL(req.url).pathname;
     if (path.startsWith('/_next/static/') && !wanted.has(path)) await cache.delete(req);
   }
-  const queue = manifest.assets.slice();
+  const queue = manifest.assets.concat(EXTRA_ASSETS);
   const worker = async () => {
     for (let url = queue.shift(); url; url = queue.shift()) {
       if (!(await cache.match(url))) await cache.add(url).catch(() => undefined);
@@ -105,6 +123,57 @@ async function syncAssets() {
   };
   await Promise.all(Array.from({ length: 4 }, worker));
   return true;
+}
+
+// Cache every page of the app, including /site/<id> for every site and the data each one
+// loads, so any page opens without signal even if it was never visited. Pages already cached are
+// kept (they refresh as they're visited, network-first); site data is re-downloaded at most
+// hourly. Runs at install and on app loads, at most every 30 minutes.
+async function syncAllPages({ force = false } = {}) {
+  const meta = await caches.open(META);
+  const last = await meta.match('/__pages-synced');
+  const lastAt = last ? Number(await last.text()) : 0;
+  if (!force && Date.now() - lastAt < PAGE_SYNC_EVERY_MS) return;
+
+  let sites;
+  try {
+    const res = await fetch('/api/sites', { cache: 'no-store' });
+    if (!res.ok) return;
+    await (await caches.open(CACHES.data)).put('/api/sites', res.clone());
+    sites = await res.json();
+  } catch {
+    return; // offline: try again on a later app load
+  }
+
+  const dataLast = await meta.match('/__data-refreshed');
+  const refreshData = !dataLast || Date.now() - Number(await dataLast.text()) > DATA_REFRESH_EVERY_MS;
+  const pages = await caches.open(CACHES.pages);
+  const data = await caches.open(CACHES.data);
+  const jobs = [];
+  for (const path of [...APP_PAGES, ...sites.map((site) => `/site/${encodeURIComponent(site.id)}`)]) {
+    jobs.push(async () => {
+      if (await pages.match(path)) return;
+      const res = await fetch(path, { cache: 'no-store' });
+      if (res.ok) await pages.put(path, res);
+    });
+  }
+  for (const site of sites) {
+    const path = `/api/sites/${encodeURIComponent(site.id)}`;
+    jobs.push(async () => {
+      if (!refreshData && (await data.match(path))) return;
+      const res = await fetch(path, { cache: 'no-store' });
+      if (res.ok) await data.put(path, res);
+    });
+  }
+  const worker = async () => {
+    for (let job = jobs.shift(); job; job = jobs.shift()) {
+      await job().catch(() => undefined);
+    }
+  };
+  await Promise.all(Array.from({ length: PAGE_SYNC_CONCURRENCY }, worker));
+
+  await meta.put('/__pages-synced', new Response(String(Date.now())));
+  if (refreshData) await meta.put('/__data-refreshed', new Response(String(Date.now())));
 }
 
 self.addEventListener('message', (event) => {
@@ -121,7 +190,7 @@ self.addEventListener('message', (event) => {
       ),
     );
   }
-  if (msg.type === 'SYNC_ASSETS') event.waitUntil(syncAssets());
+  if (msg.type === 'SYNC_ASSETS') event.waitUntil(syncAssets().then(() => syncAllPages()));
   if (msg.type === 'FLUSH_QUEUE') event.waitUntil(flushQueue());
 });
 

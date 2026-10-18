@@ -387,3 +387,15 @@ export async function removeCrewMember(siteId: string, crewId: number): Promise<
   const rows = await sql`DELETE FROM site_workers WHERE site_id = ${siteId} AND id = ${crewId} RETURNING id`;
   return rows.length > 0;
 }
+
+// Just a site's coordinates and timezone (for the weather forecast); null if it doesn't exist.
+export async function getSiteLocation(id: string): Promise<{ lat: number; lon: number; timezone: string } | null> {
+  await connection();
+  if (isMock()) {
+    const s = store().sites.find((x) => x.id === id);
+    return s ? { lat: s.lat, lon: s.lon, timezone: s.timezone } : null;
+  }
+  const sql = getSql();
+  const [row] = await sql`SELECT ST_Y(geom) AS lat, ST_X(geom) AS lon, timezone FROM sites WHERE id = ${id}`;
+  return row ? { lat: Number(row.lat), lon: Number(row.lon), timezone: String(row.timezone) } : null;
+}

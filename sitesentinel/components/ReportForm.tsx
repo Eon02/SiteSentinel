@@ -2,13 +2,15 @@
 
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
-import { Camera, CircleCheck, CloudUpload, LoaderCircle, X } from 'lucide-react';
+import { ArrowLeft, Camera, CircleCheck, CloudUpload, LoaderCircle, X } from 'lucide-react';
 import HazardIcon from './HazardIcon';
 import { Skeleton } from './Skeleton';
 import { usePolling } from '@/lib/usePolling';
 import { submitReport } from '@/lib/reportQueue';
+import { nearestSite } from '@/lib/geo';
+import { hasInAppHistory } from '@/lib/navHistory';
 import { HAZARD_TYPES, hazardLabel, type Site } from '@/lib/types';
 
 const LocationPickerMap = dynamic(() => import('./LocationPickerMap'), {
@@ -132,6 +134,7 @@ export default function ReportForm() {
   if (submitted) {
     return (
       <div className="mx-auto flex w-full max-w-xl flex-col items-center gap-4 p-6 text-center">
+        <CloseReportButton label="Back" className="self-start" />
         {submitted.status === 'sent' ? (
           <CircleCheck size={72} className="text-[#2F9E44]" aria-hidden />
         ) : (
@@ -161,7 +164,10 @@ export default function ReportForm() {
 
   return (
     <form onSubmit={onSubmit} className="mx-auto flex w-full max-w-xl flex-col gap-5 p-4" noValidate>
-      <h1 className="text-2xl font-extrabold">Report a hazard</h1>
+      <div className="flex flex-col items-start gap-1">
+        <CloseReportButton label="Cancel" confirmDiscard={Boolean(hazardType || description.trim() || photo)} />
+        <h1 className="text-2xl font-extrabold">Report a hazard</h1>
+      </div>
 
       <fieldset className="flex flex-col gap-2">
         <label htmlFor="site" className="text-lg font-bold">1. Site</label>
@@ -297,15 +303,34 @@ export default function ReportForm() {
   );
 }
 
-function nearestSite(sites: Site[], from: { lat: number; lon: number }): Site {
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dist = (s: Site) => {
-    const dLat = toRad(s.lat - from.lat);
-    const dLon = toRad(s.lon - from.lon);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(from.lat)) * Math.cos(toRad(s.lat)) * Math.sin(dLon / 2) ** 2;
-    return 2 * Math.asin(Math.sqrt(a));
-  };
-  return sites.reduce((best, s) => (dist(s) < dist(best) ? s : best));
+// Back arrow that leaves the report page (cancels the report): back to the app page the crew
+// member came from (e.g. the crew view), or home if they opened it directly (never back out of
+// the app). Asks first if a half-filled report would be lost.
+function CloseReportButton({
+  label,
+  confirmDiscard = false,
+  className = '',
+}: {
+  label: string;
+  confirmDiscard?: boolean;
+  className?: string;
+}) {
+  const router = useRouter();
+  function close() {
+    if (confirmDiscard && !window.confirm('Discard this report?')) return;
+    if (hasInAppHistory()) router.back();
+    else router.push('/');
+  }
+  return (
+    <button
+      type="button"
+      onClick={close}
+      className={`-ml-2 flex min-h-11 items-center gap-1 rounded-lg px-2 text-lg font-bold text-[#16213E] hover:bg-slate-200 ${className}`}
+    >
+      <ArrowLeft size={24} aria-hidden />
+      {label}
+    </button>
+  );
 }
 
 // Downscale to maxWidth and re-encode as JPEG so uploads are fast on a weak signal.
