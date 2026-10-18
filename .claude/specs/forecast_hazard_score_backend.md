@@ -11,7 +11,7 @@ The live hazard score now lands in `hazard_scores` (today's row, `is_forecast=fa
 **Decisions:**
 - The forecast uses the **v2 aggregation** from `.claude/specs/forecast_hazard_score.md` §5. The live model stays on noisy-OR.
 - The forecast is computed in the **conditions worker** (every 15 min), reusing the Open-Meteo daily forecast it already fetches. No new API calls.
-- UI: keep the header "Tmrw 4.6 ↑" **and** add a small grey "Tomorrow: Ground, High wind" line on the collapsed card. The expanded content is unchanged.
+- UI: keep the header "Tmrw 4.6 ↑" on the collapsed card, and show a small grey "Tomorrow: Ground, High wind" line only when the card is expanded.
 
 Model math is defined in `.claude/specs/forecast_hazard_score.md` (v0.3). Work happens on `avillate/new-model`.
 
@@ -68,13 +68,11 @@ Same shape as the live score (`hazard_input` / `hazard_row` / `store_hazard_scor
   - `rowToSite` maps it, using `[]` when it's null.
   - `mockToSite` defaults it to `[]`.
 - `sitesentinel/data/mock/sites.json`: add `forecastTopFactors` to a few sites so mock mode shows the new line.
-- `sitesentinel/components/SiteList.tsx`, in `SiteRow` under the existing state / `RiskBadge` / `Forecast` row:
-  - Add a small muted line: `Tomorrow: {top 3 forecast factors by weight, via factorLabel}`.
-  - Style: `text-sm text-slate-600`, a normal-weight sibling span inside the same button, so it doesn't affect the click or expand behavior.
-  - Render it only when `forecastTopFactors.length > 0`.
-  - Keep `Forecast` ("Tmrw 4.6 ↑") as is.
-  - Leave `SiteSummary` (expanded) and `SiteDetail.tsx` untouched.
-- Reuse `factorLabel` (`lib/risk.ts`), the same sort-by-`weight` pattern as `SiteSummary`, and `formatScore`.
+- `sitesentinel/components/SiteList.tsx`, in `SiteSummary` (the expanded panel), right after the "Top factors:" line:
+  - Add a small muted line: `Tomorrow: {top 3 forecast factors by weight}`, via the new `topFactorLabels` helper in `lib/risk.ts`.
+  - Style: `text-sm text-slate-600`. Render it only when `forecastTopFactors.length > 0`.
+  - The collapsed card is unchanged: it keeps `Forecast` ("Tmrw 4.6 ↑") and shows no reasons.
+  - Leave `SiteDetail.tsx` untouched.
 
 ## Step 4: Tests
 
@@ -101,5 +99,5 @@ Same shape as the live score (`hazard_input` / `hazard_row` / `store_hazard_scor
 1. Backend, from `backend/`: `uv run pytest -q`, `uv run ruff check .`, and `uv run ruff format --check`.
 2. Frontend, from `sitesentinel/`: `npm run lint` and `npx tsc --noEmit`.
 3. With your OK, since it writes to the DB in `DATABASE_URL`: `uv run python -m scripts.record_conditions --site <id>` should print "Forecast scores: 1 saved". A read-only query should then confirm a `CURRENT_DATE + 1` row with `is_forecast = true`.
-4. In the UI (`USE_MOCK=false`), each card shows "Tmrw X.X ↑/↓" plus the grey "Tomorrow: …" line, with today's badge and expanded content unchanged. With `USE_MOCK=true`, the mock sites show the line too.
+4. In the UI (`USE_MOCK=false`), each card shows "Tmrw X.X ↑/↓", and expanding it shows the grey "Tomorrow: …" line under "Top factors". With `USE_MOCK=true`, the mock sites show the line too.
 5. Commit in two steps, as last time: the model and its tests, then the integration, frontend and spec.

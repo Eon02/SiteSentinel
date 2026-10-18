@@ -110,11 +110,6 @@ function SiteRow({ site, rank, selected, onSelect }: { site: Site; rank: number;
               <RiskBadge score={site.score} />
               <Forecast today={site.score} tomorrow={site.forecastScore} />
             </span>
-            {site.forecastTopFactors.length > 0 && (
-              <span className="block text-sm text-slate-600">
-                Tomorrow: {topFactorLabels(site.forecastTopFactors).join(', ')}
-              </span>
-            )}
           </span>
           <ChevronDown
             size={20}
@@ -157,6 +152,11 @@ function SiteSummary({ site }: { site: Site }) {
         <p className="text-sm text-slate-900">
           <span className="font-bold">Top factors: </span>
           {factors.map((f) => factorLabel(f.factor)).join(', ')}
+        </p>
+      )}
+      {data.site.forecastTopFactors.length > 0 && (
+        <p className="text-sm text-slate-600">
+          Tomorrow: {topFactorLabels(data.site.forecastTopFactors).join(', ')}
         </p>
       )}
       {data.alerts.length > 0 && (
