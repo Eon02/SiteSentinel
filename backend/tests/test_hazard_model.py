@@ -53,9 +53,7 @@ def test_severe_weather_risk() -> None:
 
 def test_aggregate_does_not_renormalize_missing_components() -> None:
     assert aggregate_risk({"heat": None, "wind": None}) is None
-    assert aggregate_risk({"heat": 50, "wind": None}) == pytest.approx(
-        100 * (1 - 0.5**0.30)
-    )
+    assert aggregate_risk({"heat": 50, "wind": None}) == pytest.approx(100 * (1 - 0.5**0.30))
 
 
 def test_worked_example() -> None:
@@ -164,7 +162,12 @@ def test_numeric_strings_are_accepted() -> None:
 
 
 def test_extra_keys_are_ignored() -> None:
-    reading = {"site_id": "6045", "observed_at": "2026-08-14T06:45", "temp_f": 99, "humidity_pct": 1}
+    reading = {
+        "site_id": "6045",
+        "observed_at": "2026-08-14T06:45",
+        "temp_f": 99,
+        "humidity_pct": 1,
+    }
     assert current_hazard_score(reading) == EMPTY
 
 

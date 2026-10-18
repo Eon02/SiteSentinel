@@ -1,6 +1,6 @@
 # Current Hazard Score — Backend Integration Specification
 
-**Status:** Draft v0.2. Decisions locked: 0–10 score, keep the old row on a null score, module named `hazard_model.py`. Not implemented.
+**Status:** Draft v0.2. Decisions locked: 0–10 score, keep the old row on a null score, module named `hazard_model.py`. Implemented.
 **Depends on:** [`current_hazard_score.md`](current_hazard_score.md), the model spec (v0.7). That spec is the source of truth for the math. This one covers only where the model lives, how it's called, and what gets written.
 
 ## 1. Goal
@@ -117,7 +117,7 @@ ON CONFLICT (site_id, score_date) DO UPDATE SET
 | Model output | Column | Rule |
 |---|---|---|
 | `hazard_score` (0–100) | `score` (`real`, **0–10**) | Store `round(hazard_score / 10, 2)`. |
-| `top_factors[]` | `top_factors` (`jsonb`) | Store each item as `{factor, weight, risk_score, contribution, reason}`, in the model's order. `weight = round(risk_score / 10, 2)` (0–10). The other keys ride along in the JSONB and the frontend ignores them for now. |
+| `top_factors[]` | `top_factors` (`jsonb`) | Store each item as `{factor, weight, risk_score, contribution, reason}`, in the model's order. `weight = round(risk_score / 10, 3)` (0–10; three decimals so a small but positive `risk_score` never rounds to a weight of 0). The other keys ride along in the JSONB and the frontend ignores them for now. |
 | `factor` values | — | Stored as returned: `heat`, `wind`, `ground`, `severe_weather`, `Thunderstorm`. |
 | Internal diagnostics (wind `dominant_input`, ground `data_quality_flags`, saturation, and so on) | — | Not returned by `current_hazard_score`, not stored. |
 
@@ -154,7 +154,7 @@ Nothing in the model output needs a new column.
 - Thunderstorm input stores `score == 10.0` with `Thunderstorm` as the highest-weight factor.
 - A site with no usable input is skipped (`score_skipped`) and an existing row for today is left unchanged.
 - If the model raises or the hazard write fails, conditions are still stored and the error lands in `score_failed`.
-- A second run on the same day updates the row instead of inserting a duplicate.
+- The hazard write is an upsert of today's non-forecast row (asserted on the SQL text, since the unit tests run without a database): a second run on the same day updates the row instead of inserting a duplicate.
 
 ## 8. Decisions and notes
 
