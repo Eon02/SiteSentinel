@@ -4,6 +4,7 @@ import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import ConditionsSummary from './ConditionsSummary';
+import CrewSection from './CrewSection';
 import FactorBars from './FactorBars';
 import HazardIcon from './HazardIcon';
 import LightningCountdown from './LightningCountdown';
@@ -40,7 +41,7 @@ export default function SiteDetail({ id }: { id: string }) {
     );
   }
 
-  const { site, conditions, alerts, reports } = data;
+  const { site, conditions, alerts, reports, crew } = data;
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
       <OfflineNote show={offline} />
@@ -93,6 +94,8 @@ export default function SiteDetail({ id }: { id: string }) {
           </ul>
         )}
       </section>
+
+      <CrewSection siteId={site.id} siteName={site.name} crew={crew ?? []} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <section className="rounded-xl bg-white p-4">
@@ -167,6 +170,7 @@ export function SiteDetailSkeleton() {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-4 p-4">
       <Skeleton className="h-40" />
       <Skeleton className="h-12" />
+      <Skeleton className="h-28" />
       <Skeleton className="h-28" />
       <div className="grid gap-4 md:grid-cols-2">
         <Skeleton className="h-56" />

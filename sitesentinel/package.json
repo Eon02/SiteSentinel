@@ -8,6 +8,7 @@
     "prebuild": "npm run copy-maplibre-worker",
     "dev": "next dev",
     "build": "next build",
+    "postbuild": "node scripts/sw-manifest.mjs",
     "start": "next start",
     "lint": "eslint"
   },

@@ -1,12 +1,18 @@
+from typing import Annotated
+
 from fastapi import APIRouter, HTTPException, Response, status
 from geoalchemy2 import WKTElement
+from pydantic import BaseModel, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from app.config import get_settings
 from app.db import SessionDep
+from app.http import HttpClientDep
 from app.models import Site, SiteWorker
 from app.phones import normalize_phone
 from app.schemas import SiteCreate, SiteOut, WorkerCreate, WorkerOut
+from app.services.sms import OutgoingSms, send_sms
 
 router = APIRouter(prefix="/sites", tags=["sites"])
 
@@ -102,3 +108,54 @@ async def remove_worker(site_id: str, phone: str, session: SessionDep) -> Respon
     await session.delete(worker)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+SmsText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=280)]
+
+
+class CrewSmsRequest(BaseModel):
+    # Optional: the site page's "Force SMS Update" button sends no message (see text_site_crew).
+    message: SmsText | None = None
+
+
+class CrewSmsDelivery(BaseModel):
+    to: str
+    name: str | None
+    status: str  # 'sent' | 'failed' | 'skipped'
+    error: str | None
+
+
+@router.post(
+    "/{site_id}/sms",
+    responses={404: {"description": "Site not found"}},
+)
+async def text_site_crew(
+    site_id: str, body: CrewSmsRequest, session: SessionDep, client: HttpClientDep
+) -> list[CrewSmsDelivery]:
+    """Text every worker assigned to a site, one text per phone, via Twilio.
+
+    Each text reads "SiteSentinel - <site name>: <message>" (a generic status line when no
+    message is given). Returns the delivery status per worker; an empty list when the site has
+    no crew.
+
+    Note: while the team is on Twilio's free trial, TWILIO_BODY_TEMPLATE is set, so Twilio
+    replaces this text with its predefined template ("sms_internal_alerts") anyway.
+    """
+    site = await session.get(Site, site_id)
+    if site is None:
+        raise HTTPException(status_code=404, detail=f"Site {site_id!r} not found")
+    workers = list(
+        await session.scalars(
+            select(SiteWorker).where(SiteWorker.site_id == site_id).order_by(SiteWorker.id)
+        )
+    )
+    # TODO: send a proper status message: active alerts, flood risk, current conditions and
+    # tomorrow's hazard score for the site. Not built yet because on the Twilio trial every text
+    # goes out as the predefined template regardless of this body (see TWILIO_BODY_TEMPLATE).
+    message = body.message or "Site status update. Check the SiteSentinel app for details."
+    text = f"SiteSentinel - {site.name}: {message}"
+    results = await send_sms(client, get_settings(), [OutgoingSms(w.phone, text) for w in workers])
+    return [
+        CrewSmsDelivery(to=r.to, name=w.name, status=r.status, error=r.error)
+        for w, r in zip(workers, results, strict=True)
+    ]

@@ -1,6 +1,7 @@
 'use client';
 
 import { setOnline } from './connectivity';
+import { newClientId, STORES, withStore } from './offlineDb';
 import { requestRefresh } from './usePolling';
 
 // Offline queue for crew hazard reports.
@@ -11,11 +12,9 @@ import { requestRefresh } from './usePolling';
 // Background Sync in public/sw.js even if the app is closed. Each report carries a clientId the
 // server deduplicates on, so a retry after a dropped connection never creates a second report.
 //
-// The IndexedDB layout and lock name are shared with public/sw.js; keep them in sync.
+// The IndexedDB layout (lib/offlineDb.ts) and lock name are shared with public/sw.js; keep them in sync.
 
-const DB_NAME = 'sitesentinel';
-const DB_VERSION = 1;
-const STORE = 'reportQueue';
+const STORE = STORES.reports;
 const LOCK = 'sitesentinel-report-queue';
 const SYNC_TAG = 'report-queue';
 const CHANGE_EVENT = 'sitesentinel:queue';
@@ -46,46 +45,18 @@ export type SubmitResult =
 
 // --- IndexedDB ------------------------------------------------------------------------------
 
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) {
-        req.result.createObjectStore(STORE, { keyPath: 'clientId' });
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-async function withStore<T>(
-  mode: IDBTransactionMode,
-  fn: (store: IDBObjectStore) => IDBRequest<T> | void,
-): Promise<T | undefined> {
-  const db = await openDb();
-  try {
-    return await new Promise<T | undefined>((resolve, reject) => {
-      const tx = db.transaction(STORE, mode);
-      const req = fn(tx.objectStore(STORE));
-      tx.oncomplete = () => resolve(req ? req.result : undefined);
-      tx.onerror = () => reject(tx.error);
-      tx.onabort = () => reject(tx.error);
-    });
-  } finally {
-    db.close();
-  }
-}
+const withReports = <T,>(mode: IDBTransactionMode, fn: (store: IDBObjectStore) => IDBRequest<T> | void) =>
+  withStore<T>(STORE, mode, fn);
 
 export async function listQueued(): Promise<QueuedReport[]> {
-  const all = (await withStore<QueuedReport[]>('readonly', (s) => s.getAll())) ?? [];
+  const all = (await withReports<QueuedReport[]>('readonly', (s) => s.getAll())) ?? [];
   return all.sort((a, b) => a.createdAt - b.createdAt);
 }
 
 const getQueued = (clientId: string) =>
-  withStore<QueuedReport>('readonly', (s) => s.get(clientId) as IDBRequest<QueuedReport>);
-const putQueued = (record: QueuedReport) => withStore('readwrite', (s) => void s.put(record));
-const deleteQueued = (clientId: string) => withStore('readwrite', (s) => void s.delete(clientId));
+  withReports<QueuedReport>('readonly', (s) => s.get(clientId) as IDBRequest<QueuedReport>);
+const putQueued = (record: QueuedReport) => withReports('readwrite', (s) => void s.put(record));
+const deleteQueued = (clientId: string) => withReports('readwrite', (s) => void s.delete(clientId));
 
 // --- change notifications -------------------------------------------------------------------
 
@@ -262,14 +233,4 @@ export function startAutoFlush(): () => void {
     window.removeEventListener('online', flush);
     document.removeEventListener('visibilitychange', onVisible);
   };
-}
-
-// crypto.randomUUID needs HTTPS; getRandomValues works everywhere (e.g. phones on the dev LAN).
-function newClientId(): string {
-  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
-  const b = crypto.getRandomValues(new Uint8Array(16));
-  b[6] = (b[6] & 0x0f) | 0x40;
-  b[8] = (b[8] & 0x3f) | 0x80;
-  const hex = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }

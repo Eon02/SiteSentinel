@@ -1,0 +1,8 @@
+[
+  { "id": 1, "siteId": "60001", "name": "Maria Lopez", "role": "Supervisor", "phone": "+13055550101" },
+  { "id": 2, "siteId": "60001", "name": "Darnell Price", "role": "Crew lead", "phone": "+13055550102" },
+  { "id": 3, "siteId": "60001", "name": "Tom Nguyen", "role": "Equipment operator", "phone": "+13055550103" },
+  { "id": 4, "siteId": "60001", "phone": "+13055550104" },
+  { "id": 5, "siteId": "2050", "name": "Kayla Brooks", "role": "Supervisor", "phone": "+16015550111" },
+  { "id": 6, "siteId": "2050", "name": "Luis Ortega", "role": "Lineworker", "phone": "+16015550112" }
+]

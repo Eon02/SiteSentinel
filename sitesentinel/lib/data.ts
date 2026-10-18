@@ -2,12 +2,14 @@
 // USE_MOCK=true reads the JSON in data/mock (writes stay in server memory); otherwise Postgres.
 import { connection } from 'next/server';
 import { getSql } from './db';
-import type { Alert, AlertType, Conditions, HazardFactor, HazardReport, NewReport, Site, SiteDetail } from './types';
+import type { Alert, AlertType, Conditions, CrewMember, HazardFactor, HazardReport, NewReport, Site, SiteDetail } from './types';
 import mockSites from '@/data/mock/sites.json';
 import mockAlerts from '@/data/mock/alerts.json';
 import mockReports from '@/data/mock/reports.json';
+import mockCrew from '@/data/mock/crew.json';
 
 const isMock = () => process.env.USE_MOCK !== 'false';
+export const usingMockData = isMock;
 
 const LIGHTNING_MESSAGE = 'Lightning within 10 miles. Stop work.';
 
@@ -15,7 +17,8 @@ const LIGHTNING_MESSAGE = 'Lightning within 10 miles. Stop work.';
 
 type MockSite = Omit<Site, 'activeAlertCount'> & { conditions?: Conditions };
 type MockAlert = Omit<Alert, 'siteName'>;
-type MockStore = { sites: MockSite[]; alerts: MockAlert[]; reports: HazardReport[] };
+type MockCrew = CrewMember & { siteId: string };
+type MockStore = { sites: MockSite[]; alerts: MockAlert[]; reports: HazardReport[]; crew: MockCrew[] };
 
 // Kept on globalThis so every route in the same server process shares one copy.
 const globalForMock = globalThis as unknown as { mockStore?: MockStore };
@@ -26,6 +29,7 @@ function store(): MockStore {
       sites: mockSites as unknown as MockSite[],
       alerts: mockAlerts as unknown as MockAlert[],
       reports: mockReports as unknown as HazardReport[],
+      crew: mockCrew as MockCrew[],
     });
   }
   return globalForMock.mockStore;
@@ -103,6 +107,20 @@ function rowToReport(r: Row): HazardReport {
   };
 }
 
+function rowToCrew(r: Row): CrewMember {
+  return { id: Number(r.id), phone: String(r.phone), name: str(r.name), role: str(r.role) };
+}
+
+// Supervisors first, then crew leads, then everyone else; named people before unnamed.
+const ROLE_ORDER = ['supervisor', 'crew lead', 'foreman'];
+function byRole(a: CrewMember, b: CrewMember): number {
+  const rank = (c: CrewMember) => {
+    const i = ROLE_ORDER.indexOf((c.role ?? '').toLowerCase());
+    return i === -1 ? ROLE_ORDER.length : i;
+  };
+  return rank(a) - rank(b) || (a.name ? 0 : 1) - (b.name ? 0 : 1) || (a.name ?? '').localeCompare(b.name ?? '') || a.id - b.id;
+}
+
 function rowToConditions(r: Row): Conditions {
   return {
     observedAt: iso(r.observed_at)!,
@@ -154,25 +172,31 @@ export async function getSite(id: string): Promise<SiteDetail | null> {
       conditions: s.conditions,
       alerts: store().alerts.filter((a) => a.siteId === id && !a.clearedAt).map(mockToAlert).sort(newestFirst),
       reports: store().reports.filter((r) => r.siteId === id).sort(newestFirst),
+      crew: store().crew
+        .filter((c) => c.siteId === id)
+        .map((c) => ({ id: c.id, phone: c.phone, name: c.name, role: c.role }))
+        .sort(byRole),
     };
   }
 
   const sql = getSql();
   const [site] = await selectSites(id);
   if (!site) return null;
-  const [conditionRows, alertRows, reportRows] = await Promise.all([
+  const [conditionRows, alertRows, reportRows, crewRows] = await Promise.all([
     sql`SELECT * FROM conditions WHERE site_id = ${id} ORDER BY observed_at DESC LIMIT 1`,
     sql`SELECT ${sql.unsafe(ALERT_COLUMNS)} FROM alerts a JOIN sites s ON s.id = a.site_id
         WHERE a.site_id = ${id} AND a.cleared_at IS NULL ORDER BY a.started_at DESC`,
     sql`SELECT id, site_id, hazard_type, description, photo_url, reported_by,
                ST_Y(geom) AS lat, ST_X(geom) AS lon, created_at
         FROM hazard_reports WHERE site_id = ${id} ORDER BY created_at DESC LIMIT 50`,
+    sql`SELECT id, name, role, phone FROM site_workers WHERE site_id = ${id}`,
   ]);
   return {
     site,
     conditions: conditionRows[0] ? rowToConditions(conditionRows[0]) : undefined,
     alerts: alertRows.map(rowToAlert),
     reports: reportRows.map(rowToReport),
+    crew: crewRows.map(rowToCrew).sort(byRole),
   };
 }
 
@@ -316,4 +340,50 @@ export async function clearAllAlerts(): Promise<void> {
   }
   const sql = getSql();
   await sql`UPDATE alerts SET cleared_at = now() WHERE cleared_at IS NULL`;
+}
+
+// --- crew (backend table site_workers) ---------------------------------------------------
+
+export type NewCrewMember = { phone: string; name?: string; role?: string };
+
+// Adds a crew member to a site. A phone already on the site returns that member instead of a
+// duplicate, so an offline-queued add that is retried is harmless. `created` says which.
+export async function addCrewMember(
+  siteId: string,
+  input: NewCrewMember,
+): Promise<{ member: CrewMember; created: boolean }> {
+  await connection();
+  if (isMock()) {
+    const crew = store().crew;
+    const existing = crew.find((c) => c.siteId === siteId && c.phone === input.phone);
+    if (existing) return { member: { id: existing.id, phone: existing.phone, name: existing.name, role: existing.role }, created: false };
+    const member = { ...input, id: Math.max(0, ...crew.map((c) => c.id)) + 1 };
+    crew.push({ ...member, siteId });
+    return { member, created: true };
+  }
+  const sql = getSql();
+  const [row] = await sql`
+    INSERT INTO site_workers (site_id, phone, name, role)
+    VALUES (${siteId}, ${input.phone}, ${input.name ?? null}, ${input.role ?? null})
+    ON CONFLICT (site_id, phone) WHERE phone IS NOT NULL DO NOTHING
+    RETURNING id, name, role, phone`;
+  if (row) return { member: rowToCrew(row), created: true };
+  const [existing] = await sql`
+    SELECT id, name, role, phone FROM site_workers WHERE site_id = ${siteId} AND phone = ${input.phone}`;
+  return { member: rowToCrew(existing), created: false };
+}
+
+// Removes a crew member from a site. Returns false if they weren't on it.
+export async function removeCrewMember(siteId: string, crewId: number): Promise<boolean> {
+  await connection();
+  if (isMock()) {
+    const crew = store().crew;
+    const i = crew.findIndex((c) => c.siteId === siteId && c.id === crewId);
+    if (i === -1) return false;
+    crew.splice(i, 1);
+    return true;
+  }
+  const sql = getSql();
+  const rows = await sql`DELETE FROM site_workers WHERE site_id = ${siteId} AND id = ${crewId} RETURNING id`;
+  return rows.length > 0;
 }

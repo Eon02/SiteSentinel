@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { CloudUpload, LoaderCircle } from 'lucide-react';
 import { useOnline } from '@/lib/connectivity';
+import { startCrewAutoSync } from '@/lib/crewStore';
 import { hazardLabel } from '@/lib/types';
 import {
   discardQueued,
@@ -15,7 +16,8 @@ import {
 } from '@/lib/reportQueue';
 
 // Registers the service worker (production builds only: in `next dev` it would cache stale
-// code), keeps queued reports uploading, and shows which reports are still on this device.
+// code), keeps queued reports and crew changes syncing, and shows which reports are still on
+// this device.
 export default function OfflineSupport() {
   const online = useOnline();
   const [queued, setQueued] = useState<QueuedReport[]>([]);
@@ -30,9 +32,11 @@ export default function OfflineSupport() {
     refresh();
     const stopListening = onQueueChange(refresh);
     const stopFlushing = startAutoFlush();
+    const stopCrewSync = startCrewAutoSync();
     return () => {
       stopListening();
       stopFlushing();
+      stopCrewSync();
     };
   }, [refresh]);
 
@@ -102,6 +106,8 @@ function registerServiceWorker() {
         .map((e) => e.name)
         .filter((u) => u.startsWith(location.origin));
       reg.active?.postMessage({ type: 'CACHE_URLS', urls });
+      // Make sure all of this build's code is cached (picks up new deploys).
+      reg.active?.postMessage({ type: 'SYNC_ASSETS' });
     })
     .catch(() => undefined); // e.g. plain-HTTP LAN address: no service worker, app still works online
 }

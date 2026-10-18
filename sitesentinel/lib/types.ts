@@ -34,9 +34,16 @@ export type NewReport = {
   clientId?: string; // UUID from the device's offline queue; makes retried uploads idempotent
 };
 
+// A worker assigned to a site (backend table site_workers). Flood warnings are texted to them.
+export type CrewMember = {
+  id: number; phone: string; // E.164, e.g. +12055550123
+  name?: string; role?: string;
+};
+
 export type SiteDetail = {
   site: Site; conditions?: Conditions;
   alerts: Alert[]; reports: HazardReport[];
+  crew: CrewMember[];
 };
 
 export const HAZARD_TYPES = [

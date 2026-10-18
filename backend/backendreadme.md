@@ -212,6 +212,7 @@ warning texts for a site go to everyone on its list.
 | `GET` | `/sites/{site_id}/workers` | List the site's workers |
 | `POST` | `/sites/{site_id}/workers` | Attach a worker: `{"phone": "...", "name": "...", "role": "..."}` (name and role optional) |
 | `DELETE` | `/sites/{site_id}/workers/{phone}` | Detach a worker (phone in any format) |
+| `POST` | `/sites/{site_id}/sms` | Text every worker on the site, as "SiteSentinel - <site>: <message>"; `message` (1-280 chars) is optional and defaults to a generic status line (TODO: a real status message). On the Twilio trial, `TWILIO_BODY_TEMPLATE` replaces the body. Returns the status per worker |
 
 ```bash
 curl -X POST localhost:8000/sites/6045/workers -H 'content-type: application/json' \

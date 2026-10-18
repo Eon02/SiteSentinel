@@ -1,7 +1,8 @@
 /* SiteSentinel service worker: offline-first caching and background upload of queued reports.
  *
  * Caching
- *   /_next/static/*, /icons/*  cache-first (file names are content-hashed)
+ *   /_next/static/*, /icons/*  cache-first (file names are content-hashed); the whole build is
+ *                               cached up front from /sw-manifest.json (scripts/sw-manifest.mjs)
  *   pages (navigations)         network-first with a timeout, then the cached page, then /offline
  *   RSC payloads (client nav)   network-first, then cache
  *   GET /api/*                  network-first with a timeout, then the last saved response,
@@ -17,7 +18,7 @@
  * Bump VERSION when changing this file's caching rules; old caches are deleted on activate.
  */
 
-const VERSION = 'v1';
+const VERSION = 'v2';
 const CACHES = {
   pages: `ss-pages-${VERSION}`,
   static: `ss-static-${VERSION}`,
@@ -31,9 +32,9 @@ const NETWORK_TIMEOUT_MS = { page: 5000, data: 6000 };
 const MAX_ENTRIES = { tiles: 2000, images: 200 };
 const TILE_HOSTS = ['tiles.openfreemap.org'];
 
-// Shared with lib/reportQueue.ts; keep in sync.
+// Shared with lib/offlineDb.ts and lib/reportQueue.ts; keep in sync.
 const QUEUE_DB = 'sitesentinel';
-const QUEUE_DB_VERSION = 1;
+const QUEUE_DB_VERSION = 2; // lib/offlineDb.ts DB_VERSION
 const QUEUE_STORE = 'reportQueue';
 const QUEUE_LOCK = 'sitesentinel-report-queue';
 const SYNC_TAG = 'report-queue';
@@ -54,24 +55,56 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Cache the offline-critical pages and the JS/CSS they reference, so /report works offline even
-// if the crew member never opened it while in signal.
+// Cache the offline-critical pages, then all of the app's code (see syncAssets), so /report
+// works offline even if the crew member never opened it while in signal.
 async function precache() {
   const pages = await caches.open(CACHES.pages);
-  const assets = new Set();
+  const referenced = new Set();
   for (const path of PRECACHE_PAGES) {
     try {
       const res = await fetch(path, { cache: 'no-store' });
       if (!res.ok) continue;
       const html = await res.clone().text();
       await pages.put(path, res);
-      for (const match of html.matchAll(/\/_next\/static\/[^"'\s)\\]+/g)) assets.add(match[0]);
+      for (const match of html.matchAll(/\/_next\/static\/[^"'\s)\\]+/g)) referenced.add(match[0]);
     } catch {
       // Offline during install: pages get cached as they're visited instead.
     }
   }
-  const staticCache = await caches.open(CACHES.static);
-  await Promise.all([...assets].map((url) => staticCache.add(url).catch(() => undefined)));
+  const synced = await syncAssets();
+  if (!synced) {
+    // No manifest (e.g. a build without the postbuild step): cache what the pages reference.
+    const staticCache = await caches.open(CACHES.static);
+    await Promise.all([...referenced].map((url) => staticCache.add(url).catch(() => undefined)));
+  }
+}
+
+// Cache every file of the current build listed in /sw-manifest.json (written after `next build`),
+// including chunks loaded only on demand, and drop files from older builds. Runs at install and
+// on every app load, so a new deploy is cached without waiting for the worker to update.
+async function syncAssets() {
+  let manifest;
+  try {
+    const res = await fetch('/sw-manifest.json', { cache: 'no-store' });
+    if (!res.ok) return false;
+    manifest = await res.json();
+  } catch {
+    return false; // offline: keep what's cached
+  }
+  const cache = await caches.open(CACHES.static);
+  const wanted = new Set(manifest.assets);
+  for (const req of await cache.keys()) {
+    const path = new URL(req.url).pathname;
+    if (path.startsWith('/_next/static/') && !wanted.has(path)) await cache.delete(req);
+  }
+  const queue = manifest.assets.slice();
+  const worker = async () => {
+    for (let url = queue.shift(); url; url = queue.shift()) {
+      if (!(await cache.match(url))) await cache.add(url).catch(() => undefined);
+    }
+  };
+  await Promise.all(Array.from({ length: 4 }, worker));
+  return true;
 }
 
 self.addEventListener('message', (event) => {
@@ -88,6 +121,7 @@ self.addEventListener('message', (event) => {
       ),
     );
   }
+  if (msg.type === 'SYNC_ASSETS') event.waitUntil(syncAssets());
   if (msg.type === 'FLUSH_QUEUE') event.waitUntil(flushQueue());
 });
 
@@ -105,7 +139,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  if (url.pathname === '/sw.js') return;
+  if (url.pathname === '/sw.js' || url.pathname === '/sw-manifest.json') return;
   if (url.pathname.startsWith('/_next/static/') || url.pathname.startsWith('/icons/')) {
     event.respondWith(cacheFirst(request, CACHES.static));
   } else if (url.pathname.startsWith('/api/')) {
@@ -239,8 +273,10 @@ function openQueue() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(QUEUE_DB, QUEUE_DB_VERSION);
     req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(QUEUE_STORE)) {
-        req.result.createObjectStore(QUEUE_STORE, { keyPath: 'clientId' });
+      for (const name of [QUEUE_STORE, 'crew']) {
+        if (!req.result.objectStoreNames.contains(name)) {
+          req.result.createObjectStore(name, { keyPath: 'clientId' });
+        }
       }
     };
     req.onsuccess = () => resolve(req.result);

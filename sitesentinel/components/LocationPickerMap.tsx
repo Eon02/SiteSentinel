@@ -4,7 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useRef } from 'react';
 import Map, { Marker, NavigationControl, type MapRef } from 'react-map-gl/maplibre';
 import { MapPin } from 'lucide-react';
-import { MAP_STYLE } from '@/lib/maplibre';
+import { MAP_STYLE, onMapError } from '@/lib/maplibre';
 
 type Props = { lat: number; lon: number; onChange: (lat: number, lon: number) => void };
 
@@ -24,6 +24,7 @@ export default function LocationPickerMap({ lat, lon, onChange }: Props) {
       initialViewState={{ longitude: lon, latitude: lat, zoom: 15 }}
       mapStyle={MAP_STYLE}
       style={{ width: '100%', height: '100%' }}
+      onError={onMapError}
       onClick={(e) => onChange(e.lngLat.lat, e.lngLat.lng)}
     >
       <NavigationControl position="top-right" showCompass={false} />

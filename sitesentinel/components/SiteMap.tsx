@@ -4,7 +4,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Map, { Layer, Marker, NavigationControl, Popup, Source, type MapLayerMouseEvent, type MapRef } from 'react-map-gl/maplibre';
 import HazardIcon from './HazardIcon';
-import { MAP_STYLE } from '@/lib/maplibre';
+import { MAP_STYLE, onMapError } from '@/lib/maplibre';
 import { factorLabel, formatScore, riskColor, riskLevel } from '@/lib/risk';
 import { hazardLabel, type HazardReport, type Site } from '@/lib/types';
 
@@ -65,6 +65,7 @@ export default function SiteMap({
         initialViewState={initialView}
         mapStyle={MAP_STYLE}
         style={{ width: '100%', height: '100%' }}
+        onError={onMapError}
         interactiveLayerIds={['site-circles']}
         cursor={hoverId ? 'pointer' : 'grab'}
         onMouseMove={(e) => setHoverId(siteIdAt(e) ?? null)}
