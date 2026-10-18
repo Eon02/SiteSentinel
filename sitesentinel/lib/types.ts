@@ -7,12 +7,14 @@ export type Site = {
   score: number;               // today's score, 0-10
   forecastScore?: number;      // tomorrow's score
   topFactors: HazardFactor[];
+  forecastTopFactors: HazardFactor[]; // why tomorrow's score is what it is; empty without a forecast
   activeAlertCount: number;
 };
 
 export type Conditions = {
   observedAt: string; tempF?: number; heatIndexF?: number;
   precip24hIn?: number; soilMoisture?: number; windMph?: number;
+  windGustMph?: number; // peak gust; the hazard score uses the higher of this and windMph
 };
 
 export type AlertType = 'lightning' | 'flood' | 'heat' | 'wildfire' | 'storm';

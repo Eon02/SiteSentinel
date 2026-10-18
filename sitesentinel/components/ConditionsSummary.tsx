@@ -17,6 +17,7 @@ export default function ConditionsSummary({ conditions, timezone, compact = fals
       value: conditions.soilMoisture === undefined ? '—' : `${Math.round(conditions.soilMoisture * 100)}%`,
     },
     { icon: Wind, label: 'Wind', value: fmt(conditions.windMph, ' mph') },
+    { icon: Wind, label: 'Gusts', value: fmt(conditions.windGustMph, ' mph') },
   ];
   return (
     <>

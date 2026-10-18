@@ -18,17 +18,27 @@ from app.services.conditions import record_conditions
 
 
 async def run(site_ids: list[str] | None) -> int:
-    """Record conditions; returns the number of sites that failed."""
+    """Record conditions and hazard scores; returns the number of failures."""
     async with httpx.AsyncClient() as client:
         result = await record_conditions(client, site_ids)
     await engine.dispose()
 
     for site_id, error in sorted(result.failed.items()):
         print(f"{site_id}: FAILED - {error}")
+    for site_id, error in sorted(result.score_failed.items()):
+        print(f"{site_id}: SCORE FAILED - {error}")
+    for site_id in sorted(result.score_skipped):
+        print(f"{site_id}: no usable weather to score; its hazard score was left unchanged")
+    for site_id, error in sorted(result.forecast_failed.items()):
+        print(f"{site_id}: FORECAST SCORE FAILED - {error}")
+    for site_id in sorted(result.forecast_skipped):
+        print(f"{site_id}: no usable forecast for tomorrow; its forecast score was left unchanged")
     print(f"Done: {result.stored} recorded, {len(result.failed)} failed.")
+    print(f"Hazard scores: {result.scored} saved, {len(result.score_failed)} failed.")
+    print(f"Forecast scores: {result.forecast_scored} saved, {len(result.forecast_failed)} failed.")
     if site_ids and result.stored + len(result.failed) < len(set(site_ids)):
         print("Some site ids were not found.")
-    return len(result.failed)
+    return len(result.failed) + len(result.score_failed) + len(result.forecast_failed)
 
 
 def main() -> None:

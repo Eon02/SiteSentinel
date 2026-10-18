@@ -15,7 +15,10 @@ const LIGHTNING_MESSAGE = 'Lightning within 10 miles. Stop work.';
 
 // ---------- Mock store ----------
 
-type MockSite = Omit<Site, 'activeAlertCount'> & { conditions?: Conditions };
+type MockSite = Omit<Site, 'activeAlertCount' | 'forecastTopFactors'> & {
+  forecastTopFactors?: HazardFactor[];
+  conditions?: Conditions;
+};
 type MockAlert = Omit<Alert, 'siteName'>;
 type MockCrew = CrewMember & { siteId: string };
 type MockStore = { sites: MockSite[]; alerts: MockAlert[]; reports: HazardReport[]; crew: MockCrew[] };
@@ -42,7 +45,7 @@ function mockSiteName(siteId: string) {
 function mockToSite({ conditions: _conditions, ...s }: MockSite): Site {
   void _conditions;
   const activeAlertCount = store().alerts.filter((a) => a.siteId === s.id && !a.clearedAt).length;
-  return { ...s, activeAlertCount };
+  return { ...s, forecastTopFactors: s.forecastTopFactors ?? [], activeAlertCount };
 }
 
 function mockToAlert(a: MockAlert): Alert {
@@ -75,6 +78,7 @@ function rowToSite(r: Row): Site {
     score: Number(r.score ?? 0),
     forecastScore: num(r.forecast_score),
     topFactors: (r.top_factors as HazardFactor[] | null) ?? [],
+    forecastTopFactors: (r.forecast_top_factors as HazardFactor[] | null) ?? [],
     activeAlertCount: Number(r.active_alert_count ?? 0),
   };
 }
@@ -129,6 +133,7 @@ function rowToConditions(r: Row): Conditions {
     precip24hIn: num(r.precip_24h_in),
     soilMoisture: num(r.soil_moisture),
     windMph: num(r.wind_mph),
+    windGustMph: num(r.wind_gust_mph),
   };
 }
 
@@ -139,7 +144,7 @@ async function selectSites(siteId?: string): Promise<Site[]> {
            s.timezone, s.near_river,
            ST_Y(s.geom) AS lat, ST_X(s.geom) AS lon,
            COALESCE(t.score, 0) AS score, t.top_factors,
-           f.score AS forecast_score,
+           f.score AS forecast_score, f.top_factors AS forecast_top_factors,
            (SELECT count(*) FROM alerts a
              WHERE a.site_id = s.id AND a.cleared_at IS NULL)::int AS active_alert_count
     FROM sites s

@@ -6,7 +6,7 @@ import { ArrowDown, ArrowUp, ChevronDown, Minus, Search, TriangleAlert } from 'l
 import ConditionsSummary from './ConditionsSummary';
 import RiskBadge from './RiskBadge';
 import { OfflineNote, Skeleton } from './Skeleton';
-import { factorLabel, formatScore } from '@/lib/risk';
+import { factorLabel, formatScore, topFactorLabels } from '@/lib/risk';
 import { usePolling } from '@/lib/usePolling';
 import type { Site, SiteDetail } from '@/lib/types';
 
@@ -152,6 +152,11 @@ function SiteSummary({ site }: { site: Site }) {
         <p className="text-sm text-slate-900">
           <span className="font-bold">Top factors: </span>
           {factors.map((f) => factorLabel(f.factor)).join(', ')}
+        </p>
+      )}
+      {data.site.forecastTopFactors.length > 0 && (
+        <p className="text-sm text-slate-600">
+          Tomorrow: {topFactorLabels(data.site.forecastTopFactors).join(', ')}
         </p>
       )}
       {data.alerts.length > 0 && (
