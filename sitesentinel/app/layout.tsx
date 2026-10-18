@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import AlertsProvider from "@/components/AlertsProvider";
 import AlertBanner from "@/components/AlertBanner";
+import Logo from "@/components/Logo";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -35,8 +36,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <AlertsProvider>
           <header className="z-20 shrink-0 bg-[#16213E] text-white shadow">
             <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-4 py-2">
-              <Link href="/" className="flex min-h-11 items-center text-xl font-extrabold tracking-tight">
-                Site<span className="text-[#E8590C]">Sentinel</span>
+              <Link href="/" aria-label="SiteSentinel home" className="flex min-h-11 items-center">
+                <Logo />
               </Link>
               <nav aria-label="Main" className="flex items-center gap-2">
                 <Link href="/" className="flex min-h-11 items-center rounded-lg px-3 font-semibold hover:bg-white/10">
