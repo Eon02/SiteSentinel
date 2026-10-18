@@ -9,9 +9,16 @@ from sqlalchemy.exc import IntegrityError
 from app.config import get_settings
 from app.db import SessionDep
 from app.http import HttpClientDep
-from app.models import Site, SiteWorker
+from app.models import Site, SiteManager, SiteWorker
 from app.phones import normalize_phone
-from app.schemas import SiteCreate, SiteOut, WorkerCreate, WorkerOut
+from app.schemas import (
+    ManagerCreate,
+    ManagerOut,
+    SiteCreate,
+    SiteOut,
+    WorkerCreate,
+    WorkerOut,
+)
 from app.services.sms import OutgoingSms, send_sms
 
 router = APIRouter(prefix="/sites", tags=["sites"])
@@ -106,6 +113,65 @@ async def remove_worker(site_id: str, phone: str, session: SessionDep) -> Respon
     if worker is None:
         raise HTTPException(status_code=404, detail=f"{phone} is not attached to site {site_id!r}")
     await session.delete(worker)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _manager_out(manager: SiteManager) -> ManagerOut:
+    return ManagerOut.model_construct(
+        id=manager.id, site_id=manager.site_id, email=manager.email, name=manager.name
+    )
+
+
+@router.get("/{site_id}/managers")
+async def list_managers(site_id: str, session: SessionDep) -> list[ManagerOut]:
+    """Project managers of a site. POST /reports/email emails them a report on their sites."""
+    await _require_site(session, site_id)
+    managers = await session.scalars(
+        select(SiteManager).where(SiteManager.site_id == site_id).order_by(SiteManager.id)
+    )
+    return [_manager_out(m) for m in managers]
+
+
+@router.post(
+    "/{site_id}/managers",
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        404: {"description": "Site not found"},
+        409: {"description": "This email is already a manager of the site"},
+    },
+)
+async def add_manager(site_id: str, body: ManagerCreate, session: SessionDep) -> ManagerOut:
+    """Make someone a project manager of a site (by email)."""
+    await _require_site(session, site_id)
+    manager = SiteManager(site_id=site_id, **body.model_dump())
+    session.add(manager)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"{body.email} is already a manager of site {site_id!r}",
+        ) from exc
+    return _manager_out(manager)
+
+
+@router.delete(
+    "/{site_id}/managers/{email}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={404: {"description": "Not a manager of this site"}},
+)
+async def remove_manager(site_id: str, email: str, session: SessionDep) -> Response:
+    """Remove a project manager from a site by email (any case)."""
+    manager = await session.scalar(
+        select(SiteManager).where(
+            SiteManager.site_id == site_id, SiteManager.email == email.strip().lower()
+        )
+    )
+    if manager is None:
+        raise HTTPException(status_code=404, detail=f"{email} is not a manager of site {site_id!r}")
+    await session.delete(manager)
     await session.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

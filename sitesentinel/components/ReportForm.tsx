@@ -6,10 +6,11 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { ArrowLeft, Camera, CircleCheck, CloudUpload, LoaderCircle, X } from 'lucide-react';
 import HazardIcon from './HazardIcon';
-import { Skeleton } from './Skeleton';
+import { NothingSavedNote, Skeleton } from './Skeleton';
 import { usePolling } from '@/lib/usePolling';
 import { submitReport } from '@/lib/reportQueue';
 import { nearestSite } from '@/lib/geo';
+import { readLastLocation, saveLastLocation } from '@/lib/lastLocation';
 import { hasInAppHistory } from '@/lib/navHistory';
 import { HAZARD_TYPES, hazardLabel, type Site } from '@/lib/types';
 
@@ -24,7 +25,7 @@ const MAX_PHOTO_BYTES = 5 * 1024 * 1024;
 export default function ReportForm() {
   const searchParams = useSearchParams();
   const presetSiteId = searchParams.get('site');
-  const { data: sites } = usePolling<Site[]>('/api/sites', 60_000);
+  const { data: sites, loading: sitesLoading } = usePolling<Site[]>('/api/sites', 60_000);
 
   const [chosenSiteId, setSiteId] = useState(presetSiteId ?? '');
   const [hazardType, setHazardType] = useState('');
@@ -50,7 +51,9 @@ export default function ReportForm() {
     }
     navigator.geolocation.getCurrentPosition(
       (pos) => {
-        setGps({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        const fix = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        saveLastLocation(fix);
+        setGps(fix);
         setGpsStatus('ok');
       },
       () => setGpsStatus('denied'),
@@ -58,8 +61,11 @@ export default function ReportForm() {
     );
   }, []);
 
-  // No ?site= preset or user choice: default to the nearest site once we have a GPS fix.
-  const siteId = chosenSiteId || (gps && sites?.length ? nearestSite(sites, gps).id : '');
+  // No ?site= preset or user choice: default to the nearest site to a GPS fix, or (no fix) to
+  // the last location saved on this device.
+  const [lastLocation] = useState(() => readLastLocation());
+  const near = gps ?? (gpsStatus === 'denied' ? lastLocation : null);
+  const siteId = chosenSiteId || (near && sites?.length ? nearestSite(sites, near).id : '');
   const site = sites?.find((s) => s.id === siteId);
 
   // Pin: a manual drag wins, then GPS, then (location denied) the site's coordinates.
@@ -183,8 +189,15 @@ export default function ReportForm() {
               <option key={s.id} value={s.id}>{s.name}{s.state ? ` (${s.state})` : ''}</option>
             ))}
           </select>
-        ) : (
+        ) : sitesLoading ? (
           <Skeleton className="h-12" />
+        ) : (
+          <NothingSavedNote>
+            No sites saved on this device. Open the app once with signal to download them.
+          </NothingSavedNote>
+        )}
+        {sites && gpsStatus === 'denied' && !lastLocation && !chosenSiteId && (
+          <NothingSavedNote>No stored nearby location. Choose the site you&apos;re at.</NothingSavedNote>
         )}
       </fieldset>
 
@@ -256,6 +269,8 @@ export default function ReportForm() {
         <div className="h-60 overflow-hidden rounded-xl">
           {pin ? (
             <LocationPickerMap lat={pin.lat} lon={pin.lon} onChange={(lat, lon) => setManualPin({ lat, lon })} />
+          ) : gpsStatus === 'denied' ? (
+            <NothingSavedNote>No stored nearby location. Choose a site above to place the pin.</NothingSavedNote>
           ) : (
             <Skeleton className="h-full w-full" />
           )}

@@ -151,3 +151,15 @@ class SiteWorker(Base):
     name: Mapped[str | None] = mapped_column(Text)
     role: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SiteManager(Base):
+    """A project manager for a site; receives emailed reports (POST /reports/email)."""
+
+    __tablename__ = "site_managers"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.id", ondelete="CASCADE"))
+    email: Mapped[str] = mapped_column(Text)  # lowercase
+    name: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

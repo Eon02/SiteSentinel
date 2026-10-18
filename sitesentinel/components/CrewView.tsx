@@ -18,8 +18,9 @@ import {
 } from 'lucide-react';
 import { useAlerts } from './AlertsProvider';
 import LightningCountdown from './LightningCountdown';
-import { OfflineNote, Skeleton } from './Skeleton';
+import { NothingSavedNote, OfflineNote, Skeleton } from './Skeleton';
 import { nearestSite } from '@/lib/geo';
+import { readLastLocation, saveLastLocation } from '@/lib/lastLocation';
 import { usePolling } from '@/lib/usePolling';
 import type { Site } from '@/lib/types';
 import type { Forecast, WeatherKind } from '@/lib/weather';
@@ -43,13 +44,23 @@ const ICONS: Record<WeatherKind, LucideIcon> = {
 export default function CrewView({ onSupervisorView }: { onSupervisorView: () => void }) {
   const sites = usePolling<Site[]>('/api/sites', 60_000);
   const [chosen, setChosen] = useState<string | null>(() => readSaved());
-  const [gps, setGps] = useState<{ lat: number; lon: number } | null>(null);
+  const [gps, setGps] = useState<{ lat: number; lon: number } | null>(() => readLastLocation());
+  const [gpsDone, setGpsDone] = useState(false); // finished asking for a fix (got one or not)
 
   useEffect(() => {
-    if (chosen || !('geolocation' in navigator)) return;
+    if (chosen) return;
+    if (!('geolocation' in navigator)) {
+      queueMicrotask(() => setGpsDone(true));
+      return;
+    }
     navigator.geolocation.getCurrentPosition(
-      (pos) => setGps({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
-      () => undefined,
+      (pos) => {
+        const fix = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+        saveLastLocation(fix);
+        setGps(fix);
+        setGpsDone(true);
+      },
+      () => setGpsDone(true),
       { timeout: 15_000, maximumAge: 300_000 },
     );
   }, [chosen]);
@@ -95,14 +106,25 @@ export default function CrewView({ onSupervisorView }: { onSupervisorView: () =>
               </option>
             ))}
           </select>
-        ) : (
+        ) : sites.loading ? (
           <Skeleton className="h-12" />
+        ) : (
+          <NothingSavedNote>No sites saved on this device. Open the app once with signal to download them.</NothingSavedNote>
         )}
       </label>
+      {list.length > 0 && !chosen && !gps && gpsDone && (
+        <NothingSavedNote>No stored nearby location. Pick your site above.</NothingSavedNote>
+      )}
 
       <OfflineNote show={sites.offline} />
 
-      {siteId ? <WeatherCard siteId={siteId} /> : <Skeleton className="h-48" />}
+      {siteId ? (
+        <WeatherCard siteId={siteId} />
+      ) : sites.loading ? (
+        <Skeleton className="h-48" />
+      ) : (
+        <NothingSavedNote>No weather saved on this device. It downloads next time you have signal.</NothingSavedNote>
+      )}
 
       <Link
         href={siteId ? `/report?site=${encodeURIComponent(siteId)}` : '/report'}
@@ -121,7 +143,11 @@ function WeatherCard({ siteId }: { siteId: string }) {
   const { data, loading, offline } = usePolling<Forecast>(`/api/sites/${encodeURIComponent(siteId)}/forecast`, 600_000);
   if (loading && !data) return <Skeleton className="h-48" />;
   if (!data) {
-    return <p className="rounded-xl bg-white p-4 text-slate-800">Weather isn&apos;t available right now.</p>;
+    return offline ? (
+      <NothingSavedNote>No weather saved for this site. It downloads next time you have signal.</NothingSavedNote>
+    ) : (
+      <p className="rounded-xl bg-white p-4 text-slate-800">Weather isn&apos;t available right now.</p>
+    );
   }
   const Icon = ICONS[data.kind];
   const deg = (v: number | null) => (v === null ? '–' : `${Math.round(v)}°`);
@@ -152,13 +178,15 @@ function WeatherCard({ siteId }: { siteId: string }) {
 }
 
 function SiteAlerts({ siteId, siteName }: { siteId: string | null; siteName?: string }) {
-  const { data: alerts } = useAlerts();
+  const { data: alerts, loading } = useAlerts();
   const mine = (alerts ?? []).filter((a) => a.siteId === siteId);
   return (
     <section aria-label="Active alerts" className="flex flex-col gap-2">
       <h2 className="text-lg font-bold">Active alerts{siteName ? ` · ${siteName}` : ''}</h2>
-      {!alerts ? (
+      {!alerts && loading ? (
         <Skeleton className="h-16" />
+      ) : !alerts ? (
+        <NothingSavedNote>No alerts saved on this device. They download next time you have signal.</NothingSavedNote>
       ) : mine.length === 0 ? (
         <p className="rounded-xl bg-white p-4 font-semibold text-slate-800">No active alerts.</p>
       ) : (

@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.db import engine
-from app.routers import alerts, briefings, health, sites, weather
+from app.routers import alerts, briefings, health, reports, sites, weather
 from app.services.briefings import scheduler_loop
 from app.services.conditions import conditions_loop
 from app.services.flood_warnings import flood_check_loop
@@ -55,3 +55,4 @@ app.include_router(sites.router)
 app.include_router(weather.router)
 app.include_router(briefings.router)
 app.include_router(alerts.router)
+app.include_router(reports.router)

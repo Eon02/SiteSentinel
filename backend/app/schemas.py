@@ -3,7 +3,15 @@
 from typing import Annotated
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    EmailStr,
+    Field,
+    StringConstraints,
+    field_validator,
+)
 
 from app.phones import Phone
 
@@ -68,5 +76,27 @@ class WorkerCreate(BaseModel):
 
 
 class WorkerOut(WorkerCreate):
+    id: int
+    site_id: str
+
+
+def _lower(value: str) -> str:
+    return value.lower()
+
+
+# Validated address, stored lowercase so the same manager isn't added twice.
+Email = Annotated[EmailStr, AfterValidator(_lower)]
+
+
+class ManagerCreate(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": {"email": "pat.lee@example.com", "name": "Pat Lee"}}
+    )
+
+    email: Email
+    name: Annotated[str, StringConstraints(strip_whitespace=True, max_length=200)] | None = None
+
+
+class ManagerOut(ManagerCreate):
     id: int
     site_id: str

@@ -41,6 +41,21 @@ class Settings(BaseSettings):
     # warning text. Remove it once the account is upgraded.
     twilio_body_template: str | None = None
 
+    # Outgoing email (project manager reports). Any SMTP provider works, e.g. Gmail with an app
+    # password (smtp.gmail.com:587), Outlook, SendGrid or Mailtrap for testing.
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None  # e.g. "SiteSentinel <alerts@example.com>"; defaults to username
+    smtp_starttls: bool = True  # STARTTLS on 587; set false and port 465 for implicit TLS
+
+    # Gemini writes the project manager reports (POST /reports/email). Get a key at
+    # https://aistudio.google.com/apikey. Without one, reports use a plain built-in summary.
+    gemini_api_key: str | None = None
+    gemini_model: str = "gemini-3.8-flash"
+    gemini_api_url: str = "https://generativelanguage.googleapis.com/v1beta"
+
     # Automated flood checks: keep flood alerts in the alerts table current. Sends no messages.
     # Off by default; turn on in exactly one deployed instance (like BRIEFINGS_ENABLED).
     flood_checks_enabled: bool = False

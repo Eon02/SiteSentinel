@@ -1,9 +1,10 @@
 import os
 
 # Tests must never pick up a developer's backend/.env or shell settings: that file holds real
-# Twilio credentials and webhook URLs, and tests would send real texts with them.
+# Twilio, SMTP and Gemini credentials and webhook URLs, and tests would send real texts and
+# emails with them.
 for key in list(os.environ):
-    if key.startswith(("TWILIO_", "BRIEFING", "FLOOD_CHECK")):
+    if key.startswith(("TWILIO_", "SMTP_", "GEMINI_", "BRIEFING", "FLOOD_CHECK")):
         del os.environ[key]
 
 # Tests that don't touch the database still need a URL to build the engine.

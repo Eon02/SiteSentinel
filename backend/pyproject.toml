@@ -5,6 +5,7 @@ description = "FastAPI backend for SiteSentinel job-site hazard monitoring"
 readme = "backendreadme.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
+    "aiosmtplib>=5.1.3",
     "asyncpg>=0.32.0",
     "fastapi[standard]>=0.143.3",
     "geoalchemy2>=0.20.0",

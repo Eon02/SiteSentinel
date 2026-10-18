@@ -223,6 +223,32 @@ Phone numbers are accepted in any common format and stored in E.164 form (`+1205
 `+country` code are read as US numbers. Adding a number that's already on the site returns `409`, an invalid number
 `422`, and an unknown site `404`. Deleting a site removes its workers.
 
+## Project manager reports (email, Gemini)
+
+Each site has project managers in the `site_managers` table, identified by email.
+`POST /reports/email` gathers what the backend knows about their sites: latest conditions, today's and
+upcoming hazard scores, active alerts, crew hazard reports from the last `days` (default 7) and FEMA flood risk.
+Gemini then writes a short plain-text summary, and each manager gets one email covering every site they manage.
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/sites/{site_id}/managers` | List the site's project managers |
+| `POST` | `/sites/{site_id}/managers` | Add a manager: `{"email": "...", "name": "..."}` (name optional; email stored lowercase) |
+| `DELETE` | `/sites/{site_id}/managers/{email}` | Remove a manager |
+| `POST` | `/reports/email` | Email the reports. Optional: `emails` (extra recipients, who get `site_ids` or every site), `notify_site_managers` (default true), `site_ids`, `days`, `dry_run` |
+
+```bash
+# Preview the report for two sites without emailing anyone
+curl -X POST localhost:8000/reports/email -H 'content-type: application/json'      -d '{"site_ids": ["46", "1"], "notify_site_managers": false, "dry_run": true}'
+```
+
+Recipients who cover the same sites share one report, so one Gemini call. Each report in the response has its
+`subject`, `body`, `summary_source` and per-address `deliveries` (`sent`, `failed`, or `skipped` when SMTP isn't
+configured). Set `SMTP_*` (e.g. Gmail with an app password) and `GEMINI_API_KEY`
+([Google AI Studio](https://aistudio.google.com/apikey)); `GEMINI_MODEL` defaults to `gemini-3.8-flash`.
+Without a key, or if Gemini fails, the email carries a plain built-in summary instead
+(`summary_source: "fallback"`, with the reason in `summary_error`). Tests mock SMTP and Gemini and ignore `.env`.
+
 ## Flood warnings (SMS)
 
 A site is at flood risk when either:
