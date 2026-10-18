@@ -5,12 +5,14 @@ from typing import Any
 import pytest
 
 from app.services.hazard_model import (
+    aggregate_forecast_risk,
     aggregate_risk,
     current_hazard_score,
     estimate_saturation,
     ground_risk,
     heat_risk,
     severe_weather_risk,
+    tomorrow_hazard_score,
     wind_risk,
 )
 
@@ -209,3 +211,125 @@ def test_ground_reason_warns_when_moisture_exceeds_porosity() -> None:
     result = current_hazard_score({"soil_moisture": 0.6})
 
     assert "exceeds the assumed soil porosity" in result["top_factors"][0]["reason"]
+
+
+# --- Tomorrow's forecast score -------------------------------------------------------------
+
+
+def test_forecast_aggregate_keeps_the_worst_component_and_adds_half_the_compound() -> None:
+    scores = {"heat": 70, "wind": 60, "ground": None, "severe_weather": None}
+    compound = 1 - (1 - 0.6) ** 0.30  # wind is the only other component
+    assert aggregate_forecast_risk(scores) == pytest.approx(100 * (0.7 + 0.5 * 0.3 * compound))
+
+
+def test_forecast_aggregate_of_one_component_is_that_component() -> None:
+    assert aggregate_forecast_risk({"wind": 42.5}) == pytest.approx(42.5)
+    assert aggregate_forecast_risk({"heat": None, "wind": None}) is None
+    assert aggregate_forecast_risk({"heat": 100, "wind": 10}) == 100
+
+
+def test_forecast_aggregate_breaks_ties_in_a_stable_order() -> None:
+    # Equal scores: whichever is dominant, the result is the same and deterministic.
+    scores = {"wind": 50, "heat": 50, "ground": 50, "severe_weather": 50}
+    assert aggregate_forecast_risk(scores) == aggregate_forecast_risk(
+        dict(reversed(scores.items()))
+    )
+
+
+def test_forecast_reference_assertions() -> None:
+    assert tomorrow_hazard_score({}) == EMPTY
+    assert tomorrow_hazard_score({"feels_like_max_f": 95})["hazard_score"] is not None
+    assert tomorrow_hazard_score({"wind_gust_max_mph": 32})["hazard_score"] is not None
+    assert tomorrow_hazard_score({"precip_in": 1})["top_factors"][0]["risk_score"] == 65
+    assert tomorrow_hazard_score({"precip_in": 3})["hazard_score"] == 100
+    assert tomorrow_hazard_score({"precip_in": 3})["top_factors"][0]["factor"] == "ground"
+    assert tomorrow_hazard_score({"precip_probability_pct": 90}) == EMPTY
+    assert tomorrow_hazard_score({"weather_code": 95})["hazard_score"] == 100
+    assert tomorrow_hazard_score({"weather_code": 95})["top_factors"][0]["factor"] == "Thunderstorm"
+    assert tomorrow_hazard_score({"weather_code": 999}) == EMPTY
+    assert tomorrow_hazard_score({"wind_gust_max_mph": -3}) == EMPTY
+    assert tomorrow_hazard_score({"precip_in": float("nan")}) == EMPTY
+
+
+def test_forecast_ground_is_the_full_rain_subscore_with_no_soil_moisture() -> None:
+    assert tomorrow_hazard_score({"precip_in": 0.5})["hazard_score"] == 35
+    assert tomorrow_hazard_score({"precip_in": 2})["hazard_score"] == 90
+    assert tomorrow_hazard_score({"precip_in": 0}) == {"hazard_score": 0.0, "top_factors": []}
+
+
+def test_forecast_thunderstorm_dominates_and_lists_the_other_hazards() -> None:
+    result = tomorrow_hazard_score(
+        {"weather_code": 96, "feels_like_max_f": 115, "wind_gust_max_mph": 32, "precip_in": 0.5}
+    )
+
+    assert result["hazard_score"] == 100
+    assert [f["factor"] for f in result["top_factors"]] == ["Thunderstorm", "heat", "wind"]
+    assert "plan to suspend exposed work" in result["top_factors"][0]["reason"]
+
+
+def test_forecast_probability_is_context_only() -> None:
+    plain = tomorrow_hazard_score({"precip_in": 1})
+    with_chance = tomorrow_hazard_score({"precip_in": 1, "precip_probability_pct": 90})
+
+    assert with_chance["hazard_score"] == plain["hazard_score"] == 65  # not scaled by 90%
+    assert "maximum precipitation probability 90%" in with_chance["top_factors"][0]["reason"]
+    assert "probability" not in plain["top_factors"][0]["reason"]
+    invalid = tomorrow_hazard_score({"precip_in": 1, "precip_probability_pct": 150})
+    assert "probability" not in invalid["top_factors"][0]["reason"]
+    assert invalid["hazard_score"] == 65
+
+
+def test_forecast_ignores_the_actual_date_and_other_keys() -> None:
+    forecast = {"date": "2026-08-15", "temp_max_f": 140, "precip_in": 1}
+    assert tomorrow_hazard_score(forecast) == tomorrow_hazard_score({"precip_in": 1})
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"feels_like_max_f": "abc"},
+        {"feels_like_max_f": True},
+        {"feels_like_max_f": float("inf")},
+        {"wind_gust_max_mph": -1},
+        {"precip_in": -0.1},
+        {"weather_code": 95.5},
+        {"weather_code": 999},
+    ],
+)
+def test_forecast_invalid_input_is_unavailable_and_never_raises(bad: dict[str, Any]) -> None:
+    assert tomorrow_hazard_score(bad) == EMPTY
+
+
+@pytest.mark.parametrize(
+    "forecast",
+    [
+        {"feels_like_max_f": 95},
+        {"wind_gust_max_mph": 32},
+        {"precip_in": 1},
+        {"precip_in": 1, "precip_probability_pct": 80},
+        {"weather_code": 65},
+        {"weather_code": 95},
+        {"feels_like_max_f": 100, "wind_gust_max_mph": 40, "precip_in": 2, "weather_code": 63},
+    ],
+)
+def test_forecast_reasons_never_mention_none(forecast: dict[str, Any]) -> None:
+    result = tomorrow_hazard_score(forecast)
+    assert result["top_factors"]
+    for factor in result["top_factors"]:
+        assert "None" not in factor["reason"]
+        assert factor["reason"].startswith(("Forecast", "Thunderstorm forecast", "Daily"))
+
+
+def test_forecast_output_is_json_safe_and_bounded() -> None:
+    result = tomorrow_hazard_score(
+        {
+            "feels_like_max_f": 500,
+            "wind_gust_max_mph": 500,
+            "precip_in": 500,
+            "weather_code": 99,
+        }
+    )
+
+    assert result["hazard_score"] == 100
+    assert len(result["top_factors"]) == 3
+    assert json.loads(json.dumps(result)) == result

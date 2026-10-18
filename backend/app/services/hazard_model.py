@@ -7,7 +7,7 @@ never raises on bad input. All curves and weights are prototype assumptions, not
 
 import math
 from bisect import bisect_right
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
 HEAT_POINTS = [(70, 0), (80, 10), (90, 25), (103, 65), (115, 85), (125, 100)]
@@ -30,6 +30,7 @@ SEVERE_WEATHER_SCORES = {
 THUNDERSTORM_CODES = {95, 96, 97, 99}
 
 WEIGHTS = {"heat": 0.30, "wind": 0.30, "ground": 0.20, "severe_weather": 0.40}
+FORECAST_COMPOUND_BONUS = 0.5  # share of the other components' compound hazard added to tomorrow's
 MAX_FACTORS = 3
 
 
@@ -97,18 +98,42 @@ def aggregate_risk(scores: Mapping[str, float | None]) -> float | None:
     return 100 * (1 - math.prod(survive))
 
 
+def aggregate_forecast_risk(scores: Mapping[str, float | None]) -> float | None:
+    """Tomorrow's index: the worst component plus half of the others' compound bonus.
+
+    R = 100 * (m + 0.5 * (1 - m) * C), where m is the highest component score (ties go to the
+    first of heat, wind, ground, severe weather) and C combines the rest like aggregate_risk.
+    A lone component is its own score; missing ones are not renormalized.
+    """
+    available = {
+        name: min(max(score / 100, 0.0), 1.0)
+        for name in WEIGHTS
+        if (score := scores.get(name)) is not None
+    }
+    if not available:
+        return None
+    dominant = max(available, key=available.__getitem__)
+    m = available[dominant]
+    compound = 1 - math.prod(
+        (1 - r) ** WEIGHTS[name] for name, r in available.items() if name != dominant
+    )
+    return 100 * (m + FORECAST_COMPOUND_BONUS * (1 - m) * compound)
+
+
 def rank_top_factors(
     scores: Mapping[str, float | None],
     weather_code: int | None,
     reasons: Mapping[str, str],
     limit: int = MAX_FACTORS,
+    aggregate: Callable[[Mapping[str, float | None]], float | None] = aggregate_risk,
 ) -> list[dict[str, Any]]:
     """Components with a positive score, ranked by leave-one-out contribution.
 
     A thunderstorm always comes first. When a saturated score zeroes the other contributions,
-    the component score breaks the tie, so those hazards are still listed.
+    the component score breaks the tie, so those hazards are still listed. `aggregate` is the
+    index the contributions are measured against.
     """
-    total = aggregate_risk(scores)
+    total = aggregate(scores)
     if total is None:
         return []
     storm = weather_code in THUNDERSTORM_CODES
@@ -116,7 +141,7 @@ def rank_top_factors(
     for name, score in scores.items():
         if score is None or score <= 0:
             continue
-        impact = max(0.0, total - (aggregate_risk({**scores, name: 0}) or 0.0))
+        impact = max(0.0, total - (aggregate({**scores, name: 0}) or 0.0))
         thunderstorm = name == "severe_weather" and storm
         candidates.append(
             (
@@ -192,4 +217,55 @@ def current_hazard_score(reading: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "hazard_score": round(total, 2) if total is not None else None,
         "top_factors": rank_top_factors(scores, code, reasons),
+    }
+
+
+def tomorrow_hazard_score(forecast: Mapping[str, Any]) -> dict[str, Any]:
+    """Score one site's daily forecast for tomorrow (.claude/specs/forecast_hazard_score.md).
+
+    Reads feels_like_max_f, wind_gust_max_mph, precip_in, precip_probability_pct and
+    weather_code; other keys are ignored. Returns {"hazard_score": 0-100 or None, "top_factors":
+    [...]}. There is no soil moisture tomorrow, so ground is the full rain subscore: 3 in or more
+    scores 100. The max precipitation probability is context for the reason text only, and alone
+    it produces no score. Never raises.
+    """
+    feels = _number(forecast.get("feels_like_max_f"))
+    gust = _number(forecast.get("wind_gust_max_mph"), low=0)
+    precip = _number(forecast.get("precip_in"), low=0)
+    chance = _number(forecast.get("precip_probability_pct"), low=0, high=100)
+    raw_code = _number(forecast.get("weather_code"))
+    code = int(raw_code) if raw_code is not None and raw_code.is_integer() else None
+
+    scores = {
+        "heat": heat_risk(feels) if feels is not None else None,
+        "wind": interpolate_clamped(gust, WIND_POINTS) if gust is not None else None,
+        "ground": interpolate_clamped(precip, RAIN_POINTS) if precip is not None else None,
+        "severe_weather": severe_weather_risk(code),
+    }
+    chance_note = f"; maximum precipitation probability {chance:g}%" if chance is not None else ""
+    reasons = {
+        "heat": (
+            f"Forecast maximum apparent temperature {_show(feels, '°F')}; "
+            "strenuous outdoor work may face heat stress."
+        ),
+        "wind": (
+            f"Forecast maximum wind gust {_show(gust, ' mph')}; "
+            "consider lifting and elevated-work exposure."
+        ),
+        "ground": (
+            f"Forecast daily precipitation {_show(precip, ' in')}{chance_note}; conservative "
+            "heavy-precipitation alert for possible access, excavation and equipment disruption; "
+            "soil moisture is unavailable."
+        ),
+        "severe_weather": (
+            f"Thunderstorm forecast (daily WMO code {code}); plan to suspend exposed work if "
+            "storms develop and verify timing and conditions on site."
+            if code in THUNDERSTORM_CODES
+            else f"Daily WMO code {code} indicates potentially hazardous weather conditions."
+        ),
+    }
+    total = aggregate_forecast_risk(scores)
+    return {
+        "hazard_score": round(total, 2) if total is not None else None,
+        "top_factors": rank_top_factors(scores, code, reasons, aggregate=aggregate_forecast_risk),
     }
