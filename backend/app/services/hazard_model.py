@@ -31,7 +31,7 @@ SEVERE_WEATHER_SCORES = {
 }  # fmt: skip
 THUNDERSTORM_CODES = {95, 96, 97, 99}
 
-WEIGHTS = {"heat": 0.30, "wind": 0.30, "ground": 0.20, "severe_weather": 0.40}
+WEIGHTS = {"heat": 0.35, "wind": 0.25, "ground": 0.20, "severe_weather": 0.40}
 COMPOUND_BONUS = 0.5  # λ: share of the other components' compound hazard added to the worst one
 MAX_FACTORS = 3
 
